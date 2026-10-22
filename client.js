@@ -77,7 +77,7 @@ window.__ModuleLoader__.load({
 		 * 代价是各项相对老基准差 ±2% 以内。
 		 * 老基准：row 20 / rowMin 7 / dot 9 / dotMin 6 / dotPad 5 / lane 14 / hit 18
 		 */
-		const Z = { row: 24, rowMin: 8, dot: 11, dotMin: 7, dotPad: 6, lane: 17, hit: 22, laneGap: 5, pad: 16, card: 270, cardOpen: 340, gap: 20, restMs: 140, graceMs: 600, rewindMs: 2000, settleMs: 1500 }
+		const Z = { row: 24, rowMin: 8, dot: 11, dotMin: 7, dotPad: 6, lane: 17, hit: 22, laneGap: 5, pad: 16, card: 270, cardOpen: 340, gap: 20, restMs: 140, graceMs: 600, rewindMs: 2000, settleMs: 1500, scanMs: 1500, turnMs: 800, pasteMs: 150 }
 
 		/**
 		 * 按百分比缩放尺寸。**只缩几何量** —— `restMs` 是时间、`card` 是文字卡片宽度，
@@ -3871,6 +3871,43 @@ window.__ModuleLoader__.load({
 			return false
 		}
 
+		/** 版面变更计数：聊天区里加了行、换了页签这类事，由两个测量钩子里的 MutationObserver 顶上去。 */
+		let layoutMutations = 0
+
+		/**
+		 * 便宜指纹：只挑"不用逐行读 rect"的几项拼成串。**纯函数**。
+		 *
+		 * 【为什么要有它】Rail 是常驻 overlay，两个测量钩子在任何界面、每个标签页里都在轮询。
+		 * 一次完整测量要逐行 `getBoundingClientRect`、还要做 4 次 `elementFromPoint` —— 空闲时
+		 * 这些全白做。先用这份指纹比一下：没变就整轮跳过。
+		 *
+		 * ⚠️ 字段要挑"版面一动就会变"的：容器顶边（宿主加了欢迎页/横幅）、内容高度（流式输出、
+		 *    图片加载完）、BFC 宽度（拖动带子改 padding）、变更计数（加行/换页签）、行数。
+		 *    漏掉某一项 = 那种变化发生后树要等下一次真正的事件才跟得上。
+		 * @param state - `{top, scrollHeight, clientHeight, clientWidth, rows, mutations, scrollTop}`
+		 * @returns 指纹串；未知状态返回空串
+		 */
+		function sceneKeyOf(state) {
+			if (state === undefined || state === null) return ''
+			const num = (value) => (Number.isFinite(value) ? Math.round(value * 10) / 10 : value)
+			return [num(state.top), num(state.scrollHeight), num(state.clientHeight), num(state.clientWidth), num(state.rows), state.mutations, num(state.scrollTop)].join(':')
+		}
+
+		/**
+		 * 空闲轮询间隔（毫秒）；页面不可见时返回 0 = 不排下一次。**纯函数**。
+		 *
+		 * 【为什么按可见性停】浏览器会把后台标签页的定时器降到 ~1 次/分钟，但每个标签页里
+		 * 这份"该不该重画"的活本来就不必干 —— 回到前台时再补一次就够了（调用方监听
+		 * visibilitychange）。开着一堆 DSH 标签页时，这是实打实的省。
+		 * @param hidden - `document.hidden`
+		 * @param every - 想要的基础间隔
+		 * @returns 毫秒；0 = 先别排
+		 */
+		function pollDelay(hidden, every) {
+			if (hidden === true) return 0
+			return Number.isFinite(every) && every > 0 ? every : 0
+		}
+
 		/**
 		 * 量聊天区滚动容器；量不到退回视口右缘。
 		 *
@@ -3889,6 +3926,7 @@ window.__ModuleLoader__.load({
 				let mutant
 				let goneAt = 0
 				let graceTimer = 0
+				let lastCheap = ''
 				const measure = () => {
 					const el = document.querySelector('[data-conversation-scroll]')
 					// ⚠️ 量不到**先别清空**。切会话时宿主会把聊天区卸了重挂，中间有几帧找不到容器；
@@ -3903,6 +3941,20 @@ window.__ModuleLoader__.load({
 						return
 					}
 					goneAt = 0
+					// ⚠️ 便宜指纹早退：容器尺寸、内容高度、BFC 宽度、容器顶边和版面变更计数都没动时，
+					//    下面两件贵事（正文右缘 = 逐行 getBoundingClientRect、遮挡判断 = 4 次
+					//    elementFromPoint）就不用做。切会话 / 流式输出 / 拖动带子 / 侧栏盖上来
+					//    都会顶动其中至少一项，但"什么都没发生"的那一秒不用再扫一遍全屏。
+					const boxRect = el.getBoundingClientRect()
+					const cheap = sceneKeyOf({
+						top: boxRect.top,
+						scrollHeight: el.scrollHeight,
+						clientHeight: el.clientHeight,
+						clientWidth: el.clientWidth,
+						mutations: layoutMutations,
+					})
+					if (cheap === lastCheap) return
+					lastCheap = cheap
 					// ⚠️ 容器被换过就改盯新的：ResizeObserver 绑的是元素实例，旧元素卸载后它再也不会响，
 					//    聊天区再变宽变高就只能等 800ms 的轮询兜底。
 					if (observer !== undefined && el !== observed) {
@@ -3929,7 +3981,7 @@ window.__ModuleLoader__.load({
 					if (typeof document.elementFromPoint === 'function' && isCovered(el, (x, y) => document.elementFromPoint(x, y))) {
 						return setBox(undefined)
 					}
-					const rect = el.getBoundingClientRect()
+					const rect = boxRect
 					const content = contentRightOf(el)
 					setBox((prev) =>
 						prev &&
@@ -3950,19 +4002,46 @@ window.__ModuleLoader__.load({
 					raf = requestAnimationFrame(measure)
 				}
 				observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule)
-				mutant = typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(schedule)
+				mutant = typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(() => {
+					// 加行 / 换页签 / 宿主重排：顶一下计数，另一个测量钩子也据此知道该重量
+					layoutMutations += 1
+					schedule()
+				})
 				measure()
+				// 兜底轮询：只在页面可见时排下一次；每次先量（里面有便宜指纹早退），再排下一次。
+				// 不用 setInterval 是为了能跟着可见性停/启，并且不让定时器在测试里吊住进程。
+				let timer = 0
+				const arm = () => {
+					clearTimeout(timer)
+					timer = 0
+					const wait = pollDelay(typeof document !== 'undefined' && document.hidden === true, Z.scanMs)
+					if (wait <= 0) return
+					timer = setTimeout(() => {
+						timer = 0
+						measure()
+						arm()
+					}, wait)
+					if (timer !== null && timer !== undefined && typeof timer.unref === 'function') timer.unref()
+				}
+				const onVisibility = () => {
+					lastCheap = ''
+					measure()
+					arm()
+				}
+				measure()
+				arm()
 				window.addEventListener('resize', schedule)
 				const offViewport = watchViewport(schedule)
-				const timer = setInterval(measure, 800)
+				document.addEventListener('visibilitychange', onVisibility)
 				return () => {
 					cancelAnimationFrame(raf)
 					clearTimeout(graceTimer)
+					clearTimeout(timer)
 					if (observer) observer.disconnect()
 					if (mutant) mutant.disconnect()
 					window.removeEventListener('resize', schedule)
+					document.removeEventListener('visibilitychange', onVisibility)
 					offViewport()
-					clearInterval(timer)
 				}
 			}, [])
 			return box
@@ -4078,10 +4157,25 @@ window.__ModuleLoader__.load({
 			react.useEffect(() => {
 				let raf = 0
 				let settleTimer = 0
-				/** 量一遍聊天行：`{turn, top, bottom}`，按 DOM 顺序。量不到容器就 undefined。 */
-				const scan = () => {
+				let lastScan = ''
+				/**
+				 * 量一遍聊天行：`{turn, top, bottom}`，按 DOM 顺序。量不到容器就 undefined。
+				 * @param force - true = 忽略便宜指纹（钉住/停稳这类"数据没动但这帧必须重算"的时刻）
+				 */
+				const scan = (force) => {
 					const el = document.querySelector('[data-conversation-scroll]')
 					if (el === null) return undefined
+					// ⚠️ 便宜指纹早退：没滚动、没加行、没换页签、没改版时，一整屏聊天行不必再逐个
+					//    getBoundingClientRect。useChatBox 那边顶的是同一个 layoutMutations 计数。
+					const cheap = sceneKeyOf({
+						scrollTop: el.scrollTop,
+						scrollHeight: el.scrollHeight,
+						clientHeight: el.clientHeight,
+						rows: el.children.length,
+						mutations: layoutMutations,
+					})
+					if (!force && cheap === lastScan) return undefined
+					lastScan = cheap
 					const box = el.getBoundingClientRect()
 					const rows = []
 					for (const row of el.querySelectorAll('[data-chat-turn]')) {
@@ -4113,7 +4207,7 @@ window.__ModuleLoader__.load({
 					clearTimeout(settleTimer)
 					if (pinned === undefined || pinned.settled !== undefined) return
 					settleTimer = setTimeout(() => {
-						const seen = scan()
+						const seen = scan(true)
 						const row = seen === undefined ? undefined : seen.rows.find((one) => one.turn === (pinned || {}).turn)
 						if (pinned !== undefined && pinned.settled === undefined && row !== undefined) pinned = settlePin(pinned, row.top)
 					}, PIN_SETTLE_MS)
@@ -4123,21 +4217,44 @@ window.__ModuleLoader__.load({
 					schedule()
 				}
 				const onPin = () => {
+					// 钉住/解钉不一定伴随滚动（点树上的点就是），强制下一帧重算
+					lastScan = ''
 					settle()
 					schedule()
 				}
 				pinWatchers.add(onPin)
+				// 兜底轮询：同 useChatBox，可见时才有下一次，每次先量（内部有便宜指纹早退）。
+				let timer = 0
+				const arm = () => {
+					clearTimeout(timer)
+					timer = 0
+					const wait = pollDelay(typeof document !== 'undefined' && document.hidden === true, Z.turnMs)
+					if (wait <= 0) return
+					timer = setTimeout(() => {
+						timer = 0
+						measure()
+						arm()
+					}, wait)
+					if (timer !== null && timer !== undefined && typeof timer.unref === 'function') timer.unref()
+				}
+				const onVisibility = () => {
+					lastScan = ''
+					measure()
+					arm()
+				}
 				measure()
+				arm()
 				document.addEventListener('scroll', onScroll, true)
 				const offViewport = watchViewport(schedule)
-				const timer = setInterval(measure, 400)
+				document.addEventListener('visibilitychange', onVisibility)
 				return () => {
 					pinWatchers.delete(onPin)
 					cancelAnimationFrame(raf)
 					clearTimeout(settleTimer)
+					clearTimeout(timer)
 					document.removeEventListener('scroll', onScroll, true)
+					document.removeEventListener('visibilitychange', onVisibility)
 					offViewport()
-					clearInterval(timer)
 				}
 			}, [])
 			return turn
@@ -4170,10 +4287,11 @@ window.__ModuleLoader__.load({
 		function useOutlines(cwd, listState, nonce) {
 			const [data, setData] = react.useState(undefined)
 			const [again, setAgain] = react.useState(0)
-			const stamp = listStamp(listState)
+			// 会话列表指纹每次渲染都重算一遍是浪费：它只跟列表快照有关（见 listStamp）。
+			const stamp = react.useMemo(() => listStamp(listState), [listState])
 			// 有会话从"在跑"变成"跑完"：跑完那一刻列表先变、日志后落盘，紧跟着的那次重拉可能
 			// 还读到旧 revision；隔一会儿再拉一次兜底（settleDelay 的说明）。
-			const runningNow = runningCount(listState)
+			const runningNow = react.useMemo(() => runningCount(listState), [listState])
 			const runningBefore = react.useRef(runningNow)
 			react.useEffect(() => {
 				const wait = settleDelay(runningBefore.current, runningNow)
@@ -7360,6 +7478,8 @@ window.__ModuleLoader__.load({
 			tapNext, hasHover, overRail, watchViewport, TAPPABLE, NO_ZOOM,
 			// 撤回的重拉节奏；会话列表的指纹（0.2 宿主上 updatedAt 不跟回答走，得把 running 算进去）；跑完之后的补拉
 			isRewindPending, rewindRetryDelay, listStamp, runningCount, settleDelay, tagOutlines,
+			// 测量节流：便宜指纹（没变就整轮跳过）和按可见性停表的轮询间隔
+			pollDelay, sceneKeyOf,
 			// 现在看到的是第几轮：按位置挑，以及点击之后的钉住
 			pickActiveTurn, pinActiveTurn, unpinActiveTurn, pinnedTurn, settlePin, nudgePin, PIN_SLACK, PIN_SETTLE_MS,
 			// 未读节点读过之后的三段式节奏
