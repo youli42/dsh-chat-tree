@@ -128,7 +128,15 @@ const BOX = { top: 0, height: 600, right: 1600 }
 
 	// ⑥ 压到底为止：再窄就是两个点叠在一起，压了也白压。
 	//    这时候**宁可超出去** —— 一棵糊成一团的树比一棵探出去一截的树更没用。
-	const crushed = railLayout(BOX, 100, 12, 20, (size) => size, 30)
+	// room = 0 是"一点地方都没有"，不是"不设限"：留 20px 带子时 rail.js 算出来正好 0
+{
+	const freeSix = railLayout(BOX, 100, 12, 6, (size) => size)
+	const squeezed = railLayout(BOX, 100, 12, 6, (size) => size, 0)
+	check(squeezed.lane < freeSix.lane, `room=0 该压列距（${squeezed.lane} 应小于 ${freeSix.lane}）`)
+	check(squeezed.railWidth <= freeSix.railWidth, 'room=0 不许比不设限还宽')
+}
+
+const crushed = railLayout(BOX, 100, 12, 20, (size) => size, 30)
 	const bottom = Math.min(free.lane, Math.max(Z.rowMin, free.dotSize + 2))
 	check(crushed.lane >= bottom - 1e-9,
 		`列距不许压到点都分不开（下限 ${bottom.toFixed(0)}，实际 ${crushed.lane.toFixed(1)}）`)

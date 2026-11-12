@@ -83,6 +83,32 @@ export function scaleText(step) {
 	return `${step}%`
 }
 
+/**
+ * 滑杆该停在第几格。**纯函数。**
+ *
+ * ⚠️ 别用 `steps.indexOf(now)`：拖分隔线写进来的是**任意像素**（247），手改配置也可能
+ *    是 50 以外的数。`Math.max(0, -1)` 会把它悄悄当成第 0 格 —— 卡片显示「不占位」，
+ *    树其实占了 247px，用户会以为设置没生效。这里取**最近**的一格；
+ *    读数另外直接显示真实值（见 ui-settings.js），不拿档位冒充。
+ * @param steps - 档位表
+ * @param value - 现在的值
+ * @returns 下标；`value` 不是有限数就 0
+ */
+export function nearestStep(steps, value) {
+	if (!Array.isArray(steps) || steps.length === 0) return 0
+	if (!Number.isFinite(value)) return 0
+	let at = 0
+	let best = Infinity
+	for (let i = 0; i < steps.length; i += 1) {
+		const distance = Math.abs(steps[i] - value)
+		if (distance < best) {
+			best = distance
+			at = i
+		}
+	}
+	return at
+}
+
 export const isHex = (value) => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)
 
 /**

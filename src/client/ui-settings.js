@@ -10,7 +10,7 @@ import { HexField } from './ui-detail.js'
 import { useObservable } from './hooks.js'
 import { useColorScheme } from './theme.js'
 import { useHover } from './pointer.js'
-import { FIELDS, ROWS, VISIBLE, themeFrom, visibleRange } from './settings-model.js'
+import { FIELDS, ROWS, VISIBLE, nearestStep, themeFrom, visibleRange } from './settings-model.js'
 
 /**
  * 宿主设置卡片的设计令牌，照抄 ui-settings-plugins 的 PluginCard / fields。
@@ -230,7 +230,9 @@ export function SettingsCard(props) {
 			head('显示范围', now.text, fields),
 			h('div', { key: 'tw', style: S.two }, VISIBLE.map((one) => {
 				const picked = one.mode === now.mode
-				const at = Math.max(0, one.steps.indexOf(valueOf(one.field)))
+				const want = valueOf(one.field)
+				// 停最近一档，但读数显示**真实值**：手改出来的 27 层不该被显示成 30 层
+				const at = nearestStep(one.steps, want)
 				return h('div', { key: one.mode, style: S.half(picked) }, [
 					h('button', {
 						key: 'm', type: 'button', disabled: !on, style: S.mode(on),
@@ -238,7 +240,7 @@ export function SettingsCard(props) {
 					}, [
 						h('span', { key: 't', style: S.tick(picked) }),
 						h('span', { key: 'l' }, one.label),
-						h('span', { key: 'v', style: S.read }, one.text(one.steps[at])),
+						h('span', { key: 'v', style: S.read }, one.text(want)),
 					]),
 					h('input', {
 						key: 'i', type: 'range', min: 0, max: one.steps.length - 1, step: 1, value: at,
@@ -257,9 +259,10 @@ export function SettingsCard(props) {
 	/** 剩下的滑杆项（节点大小），仍然一项一行。 */
 	const row = (spec) => {
 		const now = valueOf(spec.field)
-		const at = Math.max(0, spec.steps.indexOf(now))
+		const at = nearestStep(spec.steps, now)
 		return h('div', { key: spec.field, style: S.field }, [
-			head(spec.label, spec.text(spec.steps[at]), [spec.field]),
+			// 读数照实显示（247px / 47%），滑杆位置取最近一档
+			head(spec.label, spec.text(now), [spec.field]),
 			h('input', {
 				key: 'i', type: 'range', min: 0, max: spec.steps.length - 1, step: 1, value: at,
 				disabled: !on, style: S.range(on),

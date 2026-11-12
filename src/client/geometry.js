@@ -57,7 +57,10 @@ export function railLayout(box, scale, rows, maxColumn, widestOf, room) {
 	//    压了也白压。真到了连 floor 都塞不下的地步（屏幕特别窄 + 树特别宽），
 	//    那就让它超出去 —— 这时候把树画糊比画到界外更糟。
 	const floor = Math.min(lane, Math.max(z.rowMin, dotSize + 2))
-	if (Number.isFinite(room) && room > 0 && railWidth > room) {
+	// ⚠️ 是 `>= 0`，不是 `> 0`：`room = 0` 是"一点地方都没有"，不是"不设限"。
+	//    留了 20px 带子（BANDS 里真有这档）时 rail.js 算出来 room = 20 - 2*Z.gap = 0，
+	//    以前这里跳过压缩，树照旧按最宽的形状长，直接越过分隔线盖住正文。
+	if (Number.isFinite(room) && room >= 0 && railWidth > room) {
 		if (maxColumn > 0) {
 			lane = Math.max(floor, (room - edge) / maxColumn)
 			railWidth = edge + maxColumn * lane

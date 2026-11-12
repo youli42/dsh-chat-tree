@@ -3177,7 +3177,10 @@ window.__ModuleLoader__.load({
 			//    压了也白压。真到了连 floor 都塞不下的地步（屏幕特别窄 + 树特别宽），
 			//    那就让它超出去 —— 这时候把树画糊比画到界外更糟。
 			const floor = Math.min(lane, Math.max(z.rowMin, dotSize + 2))
-			if (Number.isFinite(room) && room > 0 && railWidth > room) {
+			// ⚠️ 是 `>= 0`，不是 `> 0`：`room = 0` 是"一点地方都没有"，不是"不设限"。
+			//    留了 20px 带子（BANDS 里真有这档）时 rail.js 算出来 room = 20 - 2*Z.gap = 0，
+			//    以前这里跳过压缩，树照旧按最宽的形状长，直接越过分隔线盖住正文。
+			if (Number.isFinite(room) && room >= 0 && railWidth > room) {
 				if (maxColumn > 0) {
 					lane = Math.max(floor, (room - edge) / maxColumn)
 					railWidth = edge + maxColumn * lane
@@ -5086,6 +5089,32 @@ window.__ModuleLoader__.load({
 			return `${step}%`
 		}
 
+		/**
+		 * 滑杆该停在第几格。**纯函数。**
+		 *
+		 * ⚠️ 别用 `steps.indexOf(now)`：拖分隔线写进来的是**任意像素**（247），手改配置也可能
+		 *    是 50 以外的数。`Math.max(0, -1)` 会把它悄悄当成第 0 格 —— 卡片显示「不占位」，
+		 *    树其实占了 247px，用户会以为设置没生效。这里取**最近**的一格；
+		 *    读数另外直接显示真实值（见 ui-settings.js），不拿档位冒充。
+		 * @param steps - 档位表
+		 * @param value - 现在的值
+		 * @returns 下标；`value` 不是有限数就 0
+		 */
+		function nearestStep(steps, value) {
+			if (!Array.isArray(steps) || steps.length === 0) return 0
+			if (!Number.isFinite(value)) return 0
+			let at = 0
+			let best = Infinity
+			for (let i = 0; i < steps.length; i += 1) {
+				const distance = Math.abs(steps[i] - value)
+				if (distance < best) {
+					best = distance
+					at = i
+				}
+			}
+			return at
+		}
+
 		const isHex = (value) => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)
 
 		/**
@@ -6497,7 +6526,9 @@ window.__ModuleLoader__.load({
 					head('显示范围', now.text, fields),
 					h('div', { key: 'tw', style: S.two }, VISIBLE.map((one) => {
 						const picked = one.mode === now.mode
-						const at = Math.max(0, one.steps.indexOf(valueOf(one.field)))
+						const want = valueOf(one.field)
+						// 停最近一档，但读数显示**真实值**：手改出来的 27 层不该被显示成 30 层
+						const at = nearestStep(one.steps, want)
 						return h('div', { key: one.mode, style: S.half(picked) }, [
 							h('button', {
 								key: 'm', type: 'button', disabled: !on, style: S.mode(on),
@@ -6505,7 +6536,7 @@ window.__ModuleLoader__.load({
 							}, [
 								h('span', { key: 't', style: S.tick(picked) }),
 								h('span', { key: 'l' }, one.label),
-								h('span', { key: 'v', style: S.read }, one.text(one.steps[at])),
+								h('span', { key: 'v', style: S.read }, one.text(want)),
 							]),
 							h('input', {
 								key: 'i', type: 'range', min: 0, max: one.steps.length - 1, step: 1, value: at,
@@ -6524,9 +6555,10 @@ window.__ModuleLoader__.load({
 			/** 剩下的滑杆项（节点大小），仍然一项一行。 */
 			const row = (spec) => {
 				const now = valueOf(spec.field)
-				const at = Math.max(0, spec.steps.indexOf(now))
+				const at = nearestStep(spec.steps, now)
 				return h('div', { key: spec.field, style: S.field }, [
-					head(spec.label, spec.text(spec.steps[at]), [spec.field]),
+					// 读数照实显示（247px / 47%），滑杆位置取最近一档
+					head(spec.label, spec.text(now), [spec.field]),
 					h('input', {
 						key: 'i', type: 'range', min: 0, max: spec.steps.length - 1, step: 1, value: at,
 						disabled: !on, style: S.range(on),
@@ -7430,7 +7462,7 @@ window.__ModuleLoader__.load({
 			// 未读节点读过之后的三段式节奏
 			readPhase, readAnimation, nextReadBoundary, READ_ANIM, READ_HOLD_MS, READ_FADE_MS, READ_MELT_MS,
 			// 设置（SETTINGS_NS 同时是 0.2 宿主眼里的 entry id，测试要核它）
-			SETTINGS_NS, settingsStore, stepText, layerText, scaleText, scaleZ, STEPS, LAYERS, SCALES, RADIUS, DEPTH, SCALE, FIELDS, ROWS, Z, C,
+			SETTINGS_NS, settingsStore, stepText, layerText, scaleText, nearestStep, scaleZ, STEPS, LAYERS, SCALES, RADIUS, DEPTH, SCALE, FIELDS, ROWS, Z, C,
 			// 给树留的带子：档位、读数、实际宽度的夹法、往宿主 DOM 上垫 padding 的那段样式
 			BAND, BANDS, bandText, bandWidth, installBand,
 			VISIBLE, isMode, visibleRange, stepsAway, layersAway,

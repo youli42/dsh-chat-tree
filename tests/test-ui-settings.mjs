@@ -83,11 +83,27 @@ console.log('用例 2：可写时每一项都在；默认读数是 18 层')
 		check(card.byText(label) !== undefined, `设置卡上该有「${label}」这一项`)
 	}
 	check(card.byText('18 层') !== undefined, '显示范围默认读数该是 18 层（按层数）')
-	// 三根滑杆：按层数、按步数、节点大小
+	// 四根滑杆：按层数、按步数、节点大小、对话树占位
 	const sliders = ranges(card)
 	check(sliders.length === 4, `该有 4 根滑杆（层数 / 步数 / 大小 / 占位），实际 ${sliders.length}`)
 	check(Number(sliders[0].props.max) === LAYERS.length - 1 && Number(sliders[1].props.max) === STEPS.length - 1, '两根范围滑杆的档数该等于档位表长度')
 	check(Number(sliders[1].props.value) === STEPS.indexOf(pure.RADIUS.fallback), `按步数滑杆初始该停在默认档 ${pure.RADIUS.fallback}`)
+	card.unmount()
+}
+
+console.log('用例 2b：值不在档位上 —— 滑杆停最近一档，读数照实显示')
+{
+	check(pure.nearestStep([0, 20, 40], 27) === 1, '最近一档该取 20')
+	check(pure.nearestStep([0, 20, 40], 400) === 2, '超出上限取最后一档')
+	check(pure.nearestStep([0, 20, 40], NaN) === 0, '非有限数退回第一档')
+
+	const store = fakeStore()
+	store.push({ values: Object.assign({}, store.getSnapshot().values, { railBand: 247, nodeScale: 47 }) })
+	const card = open(store)
+	const sliders = ranges(card)
+	check(Number(sliders[3].props.value) === pure.nearestStep(pure.BANDS, 247), `占位滑杆该停在最近一档，实际 ${sliders[3].props.value}`)
+	check(card.byText('247px') !== undefined, '读数该显示真实值 247px，不是被 indexOf(-1) 骗成「不占位」')
+	check(card.byText('47%') !== undefined, '节点大小读数该显示真实值 47%')
 	card.unmount()
 }
 
