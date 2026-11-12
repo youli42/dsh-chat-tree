@@ -26,6 +26,8 @@ import { check, report } from './test-kit.mjs'
 /** 每次调用记一笔 `{url, headers}`，答复由 `plan` 按顺序给。 */
 const calls = []
 let plan = []
+/** 让下一次答复"2xx 但不是 JSON"（反代错误页 / 空 body 那种）。 */
+let notJson = false
 
 globalThis.fetch = async (url, init) => {
 	calls.push({ url: String(url), headers: (init && init.headers) || {} })
@@ -34,7 +36,10 @@ globalThis.fetch = async (url, init) => {
 	return {
 		ok: status >= 200 && status < 300,
 		status,
-		json: async () => (status >= 200 && status < 300 ? { fine: true } : { error: `说好的 ${status}` }),
+		json: async () => {
+			if (notJson) throw new SyntaxError('Unexpected token < in JSON')
+			return status >= 200 && status < 300 ? { fine: true } : { error: `说好的 ${status}` }
+		},
 	}
 }
 
@@ -42,6 +47,7 @@ globalThis.fetch = async (url, init) => {
 function reset(statuses) {
 	calls.length = 0
 	plan = statuses.slice()
+	notJson = false
 }
 
 // sessionStorage 的替身：装着 remote-web-ui 那把免 cookie 设备凭据
@@ -112,6 +118,19 @@ console.log('用例 4：被围栏拒了就改走 /remote，成了就记住')
 	check(calls[0].url === '/remote/plugins/dsh-chat-tree/shape', `地址不对：${calls[0].url}`)
 	check(calls[0].headers['content-type'] === 'application/json', 'POST 的 content-type 不能在换路时掉了')
 	console.log('  403 → 换路 → 带设备头 → 记住；此后只发一次')
+}
+
+console.log('用例 5：2xx 却不是 JSON —— 报错，别把 undefined 当成数据')
+{
+	reset([200])
+	notJson = true
+	const error = await getJson('/outlines').then(
+		() => undefined,
+		(one) => one,
+	)
+	check(error !== undefined && String(error.message).includes('JSON'), `该报"答复不是 JSON"，实际 ${error && error.message}`)
+	check(calls.length === 1, `不该重试，实际发了 ${calls.length} 次`)
+	console.log('  200 + 非 JSON → 明确报错，不会让调用方拿到 undefined')
 }
 
 report()

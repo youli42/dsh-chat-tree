@@ -491,9 +491,11 @@ export function useOutlines(cwd, listState, nonce) {
 				})
 				.catch((error) => {
 					warn('拉大纲失败，树停在上一帧', error)
-					// 拉不到也要让界面知道为什么：以前这里静悄悄，整条树直接消失。
-					// 出错那份也盖上目录：旧目录的数据带着新目录的错，Rail 才知道该报错而不是顶旧树。
-					if (alive) setData((previous) => tagOutlines(Object.assign({}, previous || { sessions: [] }, { error: String((error && error.message) || error) }), cwd))
+					// ⚠️ 失败时**不能**把上一份 sessions 一起打上新 cwd 还回去。Rail 只比 cwd，
+					//    会拿旧数据照常建图，于是 `failed` 被一棵看起来正常的树盖住 ——
+					//    一次瞬时失败之后，树静默冻结在旧数据，不报错也不重试。
+					//    清空 sessions：Rail 建不出图，才会把那句错误真的显示出来。
+					if (alive) setData(tagOutlines({ sessions: [], error: String((error && error.message) || error) }, cwd))
 				})
 		}, 120)
 		return () => {

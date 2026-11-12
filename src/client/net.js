@@ -33,8 +33,15 @@ export function warn(what, error) {
 async function unwrap(response) {
 	const body = await response.json().catch(() => undefined)
 	if (!response.ok) throw new Error((body && body.error) || `HTTP ${response.status}`)
+	// 2xx 但不是 JSON（反代错误页、空 body、被网关吞掉的答复）：必须报错。
+	// 以前这里返回 undefined，useOutlines 会 `setData(undefined)` —— 树无声消失，
+	// 控制台连一条 warn 都没有，看起来就像"插件坏了"。
+	if (body === undefined) throw new Error(`答复不是 JSON（HTTP ${response.status}）`)
 	return body
 }
+
+/** 一次请求最多等多久。宿主卡住时不能把界面也一起拖住。 */
+export const REQUEST_TIMEOUT_MS = 15000
 
 /**
  * 走不走 `remote-web-ui` 的 `/remote` 通道。
@@ -96,15 +103,30 @@ function deviceId() {
  */
 async function send(path, init) {
 	const device = deviceId()
-	const go = (prefix) =>
-		fetch(`${prefix}${API}${path}`, {
+	const go = (prefix) => {
+		// 请求可能永远不回（宿主忙、网络半死）。给它一个上限，超时就当失败，
+		// 让上层走"报错"那条路，而不是整条导轨一直停在上一帧。
+		const control = typeof AbortController === 'function' ? new AbortController() : undefined
+		const timer = control === undefined ? undefined : setTimeout(() => control.abort(), REQUEST_TIMEOUT_MS)
+		return fetch(`${prefix}${API}${path}`, {
 			...init,
 			credentials: 'same-origin',
+			...(control === undefined ? {} : { signal: control.signal }),
 			headers: {
 				...(init && init.headers),
 				...(prefix !== '' && device !== undefined ? { 'x-dsh-remote-device': device } : {}),
 			},
 		})
+			.catch((error) => {
+				if (error !== null && typeof error === 'object' && error.name === 'AbortError') {
+					throw new Error(`请求超时（${REQUEST_TIMEOUT_MS / 1000}s）`)
+				}
+				throw error
+			})
+			.finally(() => {
+				if (timer !== undefined) clearTimeout(timer)
+			})
+	}
 	if (viaRemote) return go(REMOTE_PREFIX)
 	const direct = await go('')
 	if (direct.status !== 401 && direct.status !== 403) return direct
