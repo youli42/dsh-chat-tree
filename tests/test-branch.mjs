@@ -14,6 +14,15 @@
  *   → 按这段前缀折出"当时队列里有什么" → 造一个假 agent
  *   → 调 adoptBranch → 断言队列被清空 / sidecar 被写对。
  *
+ * ⚠️ 两条数据安全规矩（踩过 / 差点踩）：
+ *   · **不把整盘日志留在内存里**。本机 1000+ 个会话、解压后 2.6GB，一次全收是
+ *     4GB 默认堆下必崩。这里先扫一遍只记"哪些是分支"，断言时**按 id 重读**，
+ *     同一时刻内存里最多一份日志。
+ *   · **一个字节都不读真实旁车**。那些 sidecar 属于用户正在跑的会话，开读句柄会让
+ *     dsh-claude 的原子 rename EPERM、当场打死那一轮（AGENTS §4.1）。断言 B/B3 用的
+ *     父 sidecar 在**临时 home 里现造**一份同形状的（binding + anchors + activities），
+ *     真实 home 只用来读会话日志（那是 dsh 自己的只读 API 数据，不是旁车）。
+ *
  * 阅读顺序：
  *   第1步  准备：读盘、临时 DSH_HOME
  *   第2步  倒带：把一个分支还原成"刚出生"的样子
@@ -38,7 +47,6 @@ import zlib from 'node:zlib'
 // **整份脚本静默跳过**，而它恰好是唯一一个真跑 graft 的测试。
 const REAL_HOME = process.env.DSH_HOME_REAL || process.env.DSH_HOME || 'E:/Programs/deepseek-harness/home'
 const SESSIONS = path.join(REAL_HOME, 'sessions')
-const SIDECARS = path.join(REAL_HOME, 'plugins', 'dsh-claude', 'sessions')
 
 
 /**
@@ -85,8 +93,16 @@ if (!fs.existsSync(SESSIONS)) {
 	process.exit(0)
 }
 
-/** id（含 `session-` 前缀）→ 事件数组 */
-const logs = new Map()
+/**
+ * 只记 id → 文件，不记事件。
+ * @type {Map<string, string>}
+ */
+const files = new Map()
+/** 盘上全部会话 id（血缘表要把它们都登记成"没有父亲"，好让 graft 找到顶）。 */
+const allIds = []
+/** 真是分支（header.isSeeded 且带 inherited end-seed）的会话 id。 */
+const branchIds = []
+
 for (const bucket of fs.readdirSync(SESSIONS)) {
 	const bucketDir = path.join(SESSIONS, bucket)
 	if (!fs.statSync(bucketDir).isDirectory()) continue
@@ -95,8 +111,15 @@ for (const bucket of fs.readdirSync(SESSIONS)) {
 		// 会多出一份 v4，两份都在时以新的为准 —— 宿主自己也只认最新那一代。
 		const file = ['session.v4.jsonl.zstd', 'session.v3.jsonl.zstd'].map((name) => path.join(bucketDir, dir, name)).find((candidate) => fs.existsSync(candidate))
 		if (file === undefined) continue
+		files.set(dir, file)
+		allIds.push(dir)
+		// ⚠️ 这一步只是判定"是不是分支"，事件读完就丢。别把 `events` 存进 Map ——
+		//    那正是上一版 4GB 堆爆掉的原因（全盘解压后 2.6GB 常驻）。
 		const events = readSession(file)
-		if (events.length > 0) logs.set(dir, events)
+		const header = events.find((event) => event.type === 'session' && event.seq === undefined) || {}
+		if (header.isSeeded !== true) continue
+		const seeded = events.some((event) => event.type === 'session/end-seed' && (event.data || {}).inherited === true)
+		if (seeded) branchIds.push(dir)
 	}
 }
 
@@ -144,11 +167,10 @@ function foldInbox(events) {
  * 继承前缀的终点就是这条分支自己的 `session/end-seed {inherited:true}`——
  * 取**最后一个**，因为分支的分支会把祖先的那条也继承下来。
  * @param id - 会话 id（含 `session-` 前缀）
+ * @param events - 这条会话的完整事件
  * @returns 假 agent，或 undefined（不是分支）
  */
-function rewind(id) {
-	const events = logs.get(id)
-	if (events === undefined) return undefined
+function buildAgent(id, events) {
 	const seeds = events.filter((event) => event.type === 'session/end-seed' && (event.data || {}).inherited === true)
 	if (seeds.length === 0) return undefined
 	const inheritedEventCount = seeds[seeds.length - 1].seq
@@ -198,68 +220,104 @@ function rewind(id) {
 	}
 }
 
-const branches = [...logs.keys()].map(rewind).filter((agent) => agent !== undefined)
-console.log(`读到 ${logs.size} 个真实会话，其中 ${branches.length} 个是分支`)
-check(branches.length > 0, '盘上至少要有一个分支才测得动')
+/**
+ * 按 id 重读并倒带。**一次只在内存里放一份** —— 这是不再 OOM 的关键。
+ * @param id - 会话 id
+ * @returns 假 agent
+ */
+function rewind(id) {
+	const file = files.get(id)
+	return file === undefined ? undefined : buildAgent(id, readSession(file))
+}
 
 // 血缘表：host 半靠它往上找锚点。真实运行时由 collect() 刷新，这里手工喂。
-for (const agent of branches) lineage.set(agent.id, agent.session.header.parentSession)
-for (const id of logs.keys()) if (!lineage.has(id)) lineage.set(id, undefined)
+for (const id of allIds) if (!lineage.has(id)) lineage.set(id, undefined)
+console.log(`读到 ${allIds.length} 个真实会话，其中 ${branchIds.length} 个是分支`)
+check(branchIds.length > 0, '盘上至少要有一个分支才测得动')
 
 // ===== 第 3 步：断言 A —— 清掉继承来的待办 =====
 
 // 这是 John 这次踩的坑：他在「加上22是多少」后面开岔路问「-1呢？」，
-// 结果算成了 22+44-1 —— 因为「加上44呢？」作为一条没跑的待办被继承了过去。
-const dirty = branches.filter((agent) => agent.inbox.hasPending)
-console.log(`\n第3步：${dirty.length} 个分支出生时带着继承来的待办`)
-for (const agent of dirty) {
-	const carried = [...agent.inbox.nextTurn, ...agent.inbox.nextStep].map(say)
-	console.log(`   ${agent.id.slice(8, 20)} 继承了 ${JSON.stringify(carried)}`)
-}
-check(dirty.length > 0, '盘上至少要有一个"脏"分支，否则这条断言测了个寂寞')
-
-for (const agent of branches) {
+// 结果算成了 22+44-1 —— 因为「加上44呢？」作为一条没跑过的待办被继承了过去。
+let dirty = 0
+/** id → 父亲会话 id（顺手记下，后面挑 claudeCase 用，免得再读一遍）。 */
+const parentOf = new Map()
+console.log('')
+for (const id of branchIds) {
+	const agent = rewind(id)
+	const parentId = agent.session.header.parentSession
+	parentOf.set(id, parentId)
+	lineage.set(id, parentId)
 	const before = [...agent.inbox.nextTurn, ...agent.inbox.nextStep].map(say)
+	if (agent.inbox.hasPending) {
+		dirty += 1
+		console.log(`   ${id.slice(8, 20)} 继承了 ${JSON.stringify(before)}`)
+	}
 	adoptBranch(ctx, agent)
 	check(
 		agent.inbox.hasPending === false,
-		`${agent.id.slice(8, 20)} 接管后队列必须是空的，实际还剩 ${JSON.stringify([...agent.inbox.nextTurn, ...agent.inbox.nextStep].map(say))}（原有 ${JSON.stringify(before)}）`,
+		`${id.slice(8, 20)} 接管后队列必须是空的，实际还剩 ${JSON.stringify([...agent.inbox.nextTurn, ...agent.inbox.nextStep].map(say))}（原有 ${JSON.stringify(before)}）`,
 	)
 }
-console.log(`断言 A：${branches.length} 个分支接管后队列全部为空 —— 不会再自动重跑旧问题`)
+console.log(`第3步：${dirty} 个分支出生时带着继承来的待办`)
+check(dirty > 0, '盘上至少要有一个"脏"分支，否则这条断言测了个寂寞')
+console.log(`断言 A：${branchIds.length} 个分支接管后队列全部为空 —— 不会再自动重跑旧问题`)
 
 // ===== 第 4 步：断言 B —— 接上外部引擎的记忆 =====
+//
+// 只有 dsh-claude 那种"把对话托管给外部引擎"的才需要。
+// ⚠️ 父 sidecar 在**临时 home 里现造**：真实那几份属于用户正在跑的会话，
+//    开读句柄会让 dsh-claude 的原子 rename EPERM、当场打死那一轮（AGENTS §4.1）。
+//    会话日志是 dsh 自己的只读数据，可以读；旁车不行。
+const claudeCaseId = branchIds.find((id) => parentOf.get(id) !== undefined) || branchIds[0]
+const claudeCase = rewind(claudeCaseId)
+const forkTurn = host.__test.forkTurnOf(claudeCase.session)
 
-// 只有 dsh-claude 那种"把对话托管给外部引擎"的才需要。挑一个真有锚点的父会话来测。
-const claudeCase = branches.find((agent) => {
-	const parentId = agent.session.header.parentSession
-	if (parentId === undefined) return false
-	const file = path.join(SIDECARS, sidecarName(parentId))
-	if (!fs.existsSync(file)) return false
-	const document = JSON.parse(fs.readFileSync(file, 'utf8'))
-	const anchors = (document.rewind && document.rewind.anchors) || []
-	return document.binding !== undefined && anchors.length > 0
-})
+/**
+ * 造一份和 dsh-claude 同形状的旁车（binding + anchors + activities + pending）。
+ * @param parentId - 父会话 id
+ * @param turn - 岔路点轮次
+ * @returns 造出来的文档
+ */
+function writeParentSidecar(parentId, turn) {
+	const doc = {
+		schemaVersion: 1,
+		revision: 0,
+		activities: Array.from({ length: turn + 2 }, (_, i) => ({ turn: i + 1 })),
+		binding: { claudeSessionId: 'claude-fake-1', cwd: '/w' },
+		rewind: {
+			ranges: [],
+			anchors: Array.from({ length: turn + 2 }, (_, i) => ({ turn: i + 1, uuid: `u${i + 1}` })),
+			snapshots: Array.from({ length: turn + 2 }, (_, i) => ({ turn: i + 1, uuid: `s${i + 1}` })),
+			pending: {},
+		},
+	}
+	fs.writeFileSync(path.join(sidecarDir, sidecarName(parentId)), `${JSON.stringify(doc)}\n`)
+	return doc
+}
 
-if (claudeCase === undefined) {
-	console.log('\n断言 B：跳过（盘上没有带锚点的 dsh-claude 分支）')
+let claudeParentId
+if (forkTurn === undefined) {
+	console.log('\n断言 B：跳过（挑不出带继承轮的分支）')
 } else {
-	const parentId = claudeCase.session.header.parentSession
-	const parentFile = path.join(SIDECARS, sidecarName(parentId))
-	fs.copyFileSync(parentFile, path.join(sidecarDir, sidecarName(parentId)))
-	const parentDocument = JSON.parse(fs.readFileSync(parentFile, 'utf8'))
+	// 有真实父亲就用它；桌面版 0.2.2 的 fork 不写 parentSession，这时造一个。
+	claudeParentId = typeof claudeCase.session.header.parentSession === 'string'
+		? claudeCase.session.header.parentSession
+		: 'session-fake-parent'
+	claudeCase.session.header.parentSession = claudeParentId
+	lineage.set(claudeCase.id, claudeParentId)
+	const parentDocument = writeParentSidecar(claudeParentId, forkTurn)
 
-	// 这个分支在上面已经被接管过一次了（那时父 sidecar 还没复制进临时 home，
-	// 所以什么都没写）。现在条件齐了，再跑一次。
+	// 这个分支在上面已经被接管过一次了（那时还没有父 sidecar，所以什么都没写）。
+	const childFile = path.join(sidecarDir, sidecarName(claudeCase.id))
+	fs.rmSync(childFile, { force: true })
 	adoptBranch(ctx, claudeCase)
 
-	const childFile = path.join(sidecarDir, sidecarName(claudeCase.id))
 	check(fs.existsSync(childFile), `${claudeCase.id.slice(8, 20)} 应当被写出 sidecar（没写 = 接管压根没跑）`)
 	if (!fs.existsSync(childFile)) {
 		console.log('       后面几条依赖它，跳过')
 	} else {
 		const written = JSON.parse(fs.readFileSync(childFile, 'utf8'))
-		const forkTurn = host.__test.forkTurnOf(claudeCase.session)
 		const expected = parentDocument.rewind.anchors.find((item) => item.turn === forkTurn)
 		console.log(`\n断言 B：${claudeCase.id.slice(8, 20)} 岔路在 turn${forkTurn}`)
 		check(written.binding.claudeSessionId === parentDocument.binding.claudeSessionId, '必须绑到父分支同一个外部会话（这是"记得前文"的全部关键）')
@@ -273,7 +331,7 @@ if (claudeCase === undefined) {
 			'助手正文必须裁到岔路点为止，否则新分支会显示出父分支后来的回答',
 		)
 		check(written.schemaVersion === 1, 'schema 必须合法，否则 dsh-claude 读的时候直接抛')
-		check(JSON.stringify(JSON.parse(fs.readFileSync(parentFile, 'utf8'))) === JSON.stringify(parentDocument), '父分支的 sidecar 一个字节都不能动')
+		check(JSON.stringify(JSON.parse(fs.readFileSync(path.join(sidecarDir, sidecarName(claudeParentId)), 'utf8'))) === JSON.stringify(parentDocument), '父分支的 sidecar 一个字节都不能动')
 		console.log('       绑定 / 接续点 / 裁剪 / 父分支未被动 —— 全部正确')
 
 		// 再接管一次：已经有 sidecar 了，必须拒绝覆盖
@@ -289,65 +347,61 @@ if (claudeCase === undefined) {
 // 这是最要命的一条。读父会话的旁车会让 dsh-claude 的原子写 rename 撞上 EPERM，
 // 它把那当成"Claude Code 掉线"，**整轮判失败而且故意不重放**。
 // 所以宁可让新分支没有上下文（界面上会明说），也绝不在它跑着的时候去读。
-{
-	const busyCase = branches.find((agent) => {
-		const parentId = agent.session.header.parentSession
-		return parentId !== undefined && fs.existsSync(path.join(SIDECARS, sidecarName(parentId)))
-	})
-	if (busyCase === undefined) console.log('断言 B3：跳过（盘上没有 claude 分支）')
-	else {
-		const childFile = path.join(sidecarDir, sidecarName(busyCase.id))
-		fs.rmSync(childFile, { force: true })
-		const asked = []
-		const busyCtx = {
-			logger: { info() {}, warn() {} },
-			agents: { get: (id) => (asked.push(id), { status: 'running' }) },
-		}
-		adoptBranch(busyCtx, rewind(busyCase.id))
-		check(!fs.existsSync(childFile), '父会话在跑的时候，绝不能写出 sidecar —— 写了就说明读过它')
-		check(asked.length > 0, '压根没问过"它在不在跑"，那这道闸等于不存在')
-
-		// 反过来：同一个分支，父会话空闲时必须照常接上 —— 否则这道闸就是把功能关了
-		adoptBranch(ctx, rewind(busyCase.id))
-		check(fs.existsSync(childFile), '父会话空闲时必须照常接上上下文（闸不能把功能一起关掉）')
-
-		// 认不出状态时必须当成"在跑"（fail-closed）：赌错了的代价是打死用户一轮对话
-		fs.rmSync(childFile, { force: true })
-		adoptBranch({ logger: { info() {}, warn() {} } }, rewind(busyCase.id))
-		check(!fs.existsSync(childFile), '问不出会话状态时必须当成"在跑"，不许乐观放行')
-
-		// 直接调 graft 而漏给 isBusy：必须当场拒绝，不许"默认谁都不在跑"。
-		// 这是个**沉默的**错误路径 —— 漏给一个参数就等于把整道闸拆了，
-		// 而拆了之后一切看起来都正常，直到某天打死用户一轮对话。
-		const sloppy = host.graft(busyCase.id, busyCase.session.header.parentSession, 1)
-		check(sloppy.grafted === false && sloppy.reason === 'bad-request', `漏给 isBusy 时必须拒绝，实际 ${JSON.stringify(sloppy)}`)
-		check(!fs.existsSync(childFile), '漏给 isBusy 却还是写了文件 —— 那道闸形同虚设')
-
-		// 把世界恢复成断言 B 留下的样子：那份 sidecar 本来就该在，
-		// 下面第 6 步要数文件个数，少一份的话重启重放那一段会把它又建出来
-		adoptBranch(ctx, rewind(busyCase.id))
-		console.log('断言 B3：父会话在跑 / 状态认不出 → 不读不写；空闲 → 照常接上')
+if (claudeParentId === undefined) {
+	console.log('断言 B3：跳过（没有可用的父 sidecar）')
+} else {
+	const childFile = path.join(sidecarDir, sidecarName(claudeCaseId))
+	fs.rmSync(childFile, { force: true })
+	const asked = []
+	const busyCtx = {
+		logger: { info() {}, warn() {} },
+		agents: { get: (id) => (asked.push(id), { status: 'running' }) },
 	}
+	adoptBranch(busyCtx, rewind(claudeCaseId))
+	check(!fs.existsSync(childFile), '父会话在跑的时候，绝不能写出 sidecar —— 写了就说明读过它')
+	check(asked.length > 0, '压根没问过"它在不在跑"，那这道闸等于不存在')
+
+	// 反过来：同一个分支，父会话空闲时必须照常接上 —— 否则这道闸就是把功能关了
+	adoptBranch(ctx, rewind(claudeCaseId))
+	check(fs.existsSync(childFile), '父会话空闲时必须照常接上上下文（闸不能把功能一起关掉）')
+
+	// 认不出状态时必须当成"在跑"（fail-closed）：赌错了的代价是打死用户一轮对话
+	fs.rmSync(childFile, { force: true })
+	adoptBranch({ logger: { info() {}, warn() {} } }, rewind(claudeCaseId))
+	check(!fs.existsSync(childFile), '问不出会话状态时必须当成"在跑"，不许乐观放行')
+
+	// 直接调 graft 而漏给 isBusy：必须当场拒绝，不许"默认谁都不在跑"。
+	// 这是个**沉默的**错误路径 —— 漏给一个参数就等于把整道闸拆了，
+	// 而拆了之后一切看起来都正常，直到某天打死用户一轮对话。
+	const sloppy = host.graft(claudeCaseId, claudeParentId, forkTurn)
+	check(sloppy.grafted === false && sloppy.reason === 'bad-request', `漏给 isBusy 时必须拒绝，实际 ${JSON.stringify(sloppy)}`)
+	check(!fs.existsSync(childFile), '漏给 isBusy 却还是写了文件 —— 那道闸形同虚设')
+
+	// 把世界恢复成断言 B 留下的样子：那份 sidecar 本来就该在，
+	// 下面第 6 步要数文件个数，少一份的话重启重放那一段会把它又建出来
+	adoptBranch(ctx, rewind(claudeCaseId))
+	console.log('断言 B3：父会话在跑 / 状态认不出 → 不读不写；空闲 → 照常接上')
 }
 
 // ===== 第 6 步：断言 C —— 不该动的时候一个字节都不动 =====
 
+
 const before = new Set(fs.readdirSync(sidecarDir))
 
 // 普通 provider：血缘上一个 sidecar 都没有 → 什么都不该发生
-const plain = branches.find((agent) => {
-	const parentId = agent.session.header.parentSession
-	return parentId !== undefined && !fs.existsSync(path.join(SIDECARS, sidecarName(parentId)))
+const plainId = branchIds.find((id) => {
+	const parentId = parentOf.get(id)
+	return parentId !== undefined && !fs.existsSync(path.join(sidecarDir, sidecarName(parentId)))
 })
-if (plain !== undefined) {
-	adoptBranch(ctx, plain)
-	check(!fs.existsSync(path.join(sidecarDir, sidecarName(plain.id))), '普通 provider 路径上一个文件都不许写')
+if (plainId !== undefined) {
+	adoptBranch(ctx, rewind(plainId))
+	check(!fs.existsSync(path.join(sidecarDir, sidecarName(plainId))), '普通 provider 路径上一个文件都不许写')
 }
 
 // **重启重放**：dsh 起来时会把盘上每个会话 resume 一遍，`agent/created` 照样触发。
 // 那时队列里可能正躺着用户自己排的待办 —— 删掉就是丢数据。
 // 因为只按"继承段折出来的 id"删，用户后来排的那条 id 对不上，天然安全。
-const restarted = rewind(branches[0].id)
+const restarted = rewind(branchIds[0])
 restarted.inbox.nextTurn.push({ id: 'mine-own-id', content: [{ type: 'text', text: '我自己排的队' }] })
 adoptBranch(ctx, restarted)
 check(
@@ -377,13 +431,13 @@ adoptBranch(ctx, {
 check(touched === false, '普通会话（不是分支）的待办绝不能被清掉')
 
 // sidecar 版本变了 → 立刻装死
-if (claudeCase !== undefined) {
-	const parentId = claudeCase.session.header.parentSession
-	const parentCopy = path.join(sidecarDir, sidecarName(parentId))
+if (claudeParentId !== undefined) {
+	const future = rewind(claudeCaseId)
+	const parentCopy = path.join(sidecarDir, sidecarName(claudeParentId))
 	const saved = fs.readFileSync(parentCopy, 'utf8')
 	fs.writeFileSync(parentCopy, JSON.stringify({ ...JSON.parse(saved), schemaVersion: 2 }))
-	const victim = { ...claudeCase, id: 'session-future', session: { ...claudeCase.session, id: 'session-future' } }
-	lineage.set('session-future', parentId)
+	const victim = { ...future, id: 'session-future', session: { ...future.session, id: 'session-future' } }
+	lineage.set('session-future', claudeParentId)
 	adoptBranch(ctx, victim)
 	check(!fs.existsSync(path.join(sidecarDir, sidecarName('session-future'))), 'sidecar 版本对不上时必须停手，不许写')
 	fs.writeFileSync(parentCopy, saved)
