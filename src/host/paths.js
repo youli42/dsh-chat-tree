@@ -5,7 +5,7 @@
  * 现在统一走 `atomicWrite`。读也一样：读坏了 / 版本不对一律当"没有"，
  * 调用方不必各写一套 try。
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -101,7 +101,18 @@ export function atomicWrite(target, data, options) {
 	mkdirSync(dirname(target), dirMode === undefined ? { recursive: true } : { recursive: true, mode: dirMode })
 	const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
 	writeFileSync(temporary, data, { mode: 0o600, flag: 'wx' })
-	renameSync(temporary, target)
+	try {
+		renameSync(temporary, target)
+	} catch (error) {
+		// rename 失败（目标被占 / 目标是目录 / 权限）：把临时文件清掉再抛。
+		// 留着它没人会再碰，攒久了插件目录里就是一堆孤儿 `.tmp`。
+		try {
+			unlinkSync(temporary)
+		} catch {
+			// 连删都删不掉也不能盖掉真正的错
+		}
+		throw error
+	}
 }
 
 /**

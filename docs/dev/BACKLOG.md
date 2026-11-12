@@ -24,16 +24,6 @@ T5 起是框架搭建时顺手发现、以及 AGENTS.md §5 里原来的 P1。
 
 ---
 
-### T6  `atomicWrite` 的 rename 失败时清掉 .tmp                          级别：L1
-
-**症状** AGENTS §5 P1："`atomicWrite` 的 `rename` 失败时 `.tmp` 不清理，留孤儿文件。"
-**改哪些** `src/host/paths.js` 一处 try/catch。
-**先写测试** `tests/test-icon.mjs` 或新建 `test-paths.mjs`：把目标路径做成一个**目录**让 rename 必败，
-断言抛错后同目录下没有 `.tmp`。
-**坑** 别改成"失败就直接 writeFileSync 目标"——那就不原子了（ARCHITECTURE §4 第 5 条）。
-
----
-
 ### T7  `shape.json` 只增不减                                           级别：L2
 
 **症状** AGENTS §5 P1：删掉的会话永远留在 `groupOf` / `detached` / `adopted` 里。
@@ -53,6 +43,12 @@ T5 起是框架搭建时顺手发现、以及 AGENTS.md §5 里原来的 P1。
 ---
 
 ## 已完成
+
+### ✅ T6  `atomicWrite` 的 rename 失败时清掉 .tmp                          （2026-11-12）
+
+`renameSync` 外面包一层 try/catch：失败先 `unlinkSync` 临时文件、再把原错抛出去。
+`test-parent.mjs` 用例 12 把目标做成一个目录让 rename 必败，断言目录里没有 `.tmp`
+（变异过：去掉 unlink 会红）。没有改成"失败就直接写目标"——那就不原子了。
 
 ### ✅ T9  点卡片外整张消失；给树留一条可拖的带子（railBand）              （2026-10-05）
 

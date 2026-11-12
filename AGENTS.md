@@ -158,11 +158,10 @@ node tests/test-parent.mjs       # 分支血缘补记：parents.json、按继承
   没有 binding → 全新的 Claude 会话。UI 上 `forkBlockedWhy` 已经不让在跑的 claude 会话上开岔路，
   原生消息行上的分支按钮挡不住。真要修得上游给个"重读旁车"的口子。
 
-**P1**（已切成任务卡，见 docs/dev/BACKLOG.md T6–T8）
+**P1**（已切成任务卡，见 docs/dev/BACKLOG.md T7–T8）
 
 - 自定义图片全局只留 200 张（`ICON_KEEP`），超了按 mtime 静默删，引用还在，节点变成画不出来
 - `shape.json` 只增不减，删掉的会话永远留在 `groupOf` / `detached` 里
-- `atomicWrite` 的 `rename` 失败时 `.tmp` 不清理，留孤儿文件
 - `reshape` 是读-改-写，两个客户端并发会静默丢一个补丁
 
 **John 2026-10-04 报的桌面版问题**（BACKLOG.md T1–T4）：空节点的标注所有树共用（key 是常量 `'root'`）；

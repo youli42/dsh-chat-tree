@@ -22,7 +22,7 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-chat-tree-parents-'))
 process.env.DSH_HOME = home
 const { EMPTY_PARENTS, parentsPath, readParents, rememberParent, inferParent, resolveParents } = await import('../src/host/parents.js')
 const { adoptBranch } = await import('../src/host/adopt.js')
-const { sidecarPath } = await import('../src/host/paths.js')
+const { atomicWrite, sidecarPath } = await import('../src/host/paths.js')
 
 /** 造一条 collect 形状的会话。 */
 const session = (id, createdAt, turns, extra) => Object.assign({ id, createdAt, turns, isSeeded: true }, extra)
@@ -186,6 +186,19 @@ try {
 		check(written.binding.claudeSessionId === 'claude-1', '该绑到父会话的外部会话')
 		check(written.rewind.pending.resumeAt === 'u1', `接续点该是父会话第 1 轮的锚点，实际 ${JSON.stringify(written.rewind.pending)}`)
 	}
+
+	console.log('用例 12：rename 失败时不留 .tmp')
+	const dir = path.join(home, 'rename-fails')
+	fs.mkdirSync(dir, { recursive: true })
+	let threw = false
+	try {
+		atomicWrite(dir, 'x')
+	} catch {
+		threw = true
+	}
+	check(threw, '目标是目录时 rename 必须失败（这条用例的前提）')
+	const dropped = fs.readdirSync(home).filter((name) => name.endsWith('.tmp'))
+	check(dropped.length === 0, `rename 失败后留下了 .tmp：${dropped.join(', ')}`)
 } finally {
 	if (was === undefined) delete process.env.DSH_HOME
 	else process.env.DSH_HOME = was
