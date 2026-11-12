@@ -85,7 +85,8 @@ console.log('用例 5：路由 —— index.js 开的路径和浏览器半调的
 	}
 	const onlyHost = [...hostRoutes].filter((path) => !clientRoutes.has(path))
 	const onlyClient = [...clientRoutes].filter((path) => !hostRoutes.has(path))
-	check(hostRoutes.size >= 4, `index.js 里只扫到 ${hostRoutes.size} 条 route() —— 正则没对上写法？`)
+	// 条数是**钉死的**：加路由时这里跟着改，顺便逼你想清楚浏览器半有没有人调
+	check(hostRoutes.size === 6, `index.js 里扫到 ${hostRoutes.size} 条 route()（该是 6 条）—— 正则没对上写法，或者漏/多开了路由`)
 	check(onlyHost.length === 0, `host 开了但浏览器没人调：${onlyHost.join(', ')}`)
 	check(onlyClient.length === 0, `浏览器在调但 host 没开：${onlyClient.join(', ')} —— index.js 里加一条 route(ctx, …)`)
 	console.log(`  ${[...hostRoutes].sort().join(' ')}`)

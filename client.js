@@ -157,7 +157,7 @@ window.__ModuleLoader__.load({
 		// ===== net.js ==================================================
 
 		/**
-		 * 和 host 半说话的唯一出口：三个路由的地址、两个 fetch、一个 warn。
+		 * 和 host 半说话的唯一出口：六条路由的地址、两个 fetch、一个 warn。
 		 *
 		 * 【为什么单独一份】以前三处各写一遍 `fetch(...).then(r => r.ok ? r.json() : reject)`，
 		 * 三处的出错处理各不相同（一处吞掉、一处抛、一处 console.warn），加第四个路由时
@@ -168,7 +168,7 @@ window.__ModuleLoader__.load({
 		 * host 那边的对应物是 `src/host/http.js`，两边的错误体格式都是 `{error: string}`。
 		 */
 
-		/** host 半三个路由的公共前缀。改路由只改这一行（host 的 `src/host/http.js` 里有同一个常量）。 */
+		/** host 半六条路由的公共前缀。改路由只改这一行（host 的 `src/host/http.js` 里有同一个常量）。 */
 		const API = '/plugins/dsh-chat-tree'
 
 		/**
@@ -204,7 +204,7 @@ window.__ModuleLoader__.load({
 		/**
 		 * 走不走 `remote-web-ui` 的 `/remote` 通道。
 		 *
-		 * 【为什么需要这个】host 半的三条路由现在问宿主的 `connection` 要判决，
+		 * 【为什么需要这个】host 半的六条路由现在问宿主的 `connection` 要判决，
 		 * 那道闸是 **loopback-only** 的：Host 不是 127.0.0.1 / localhost 就直接 403。
 		 * 手机在局域网里开的页面，Host 是局域网 IP —— 直连必然被拒。
 		 *

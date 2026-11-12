@@ -128,10 +128,10 @@ Once a node is starred, its card offers two more rows:
   triangle, arrow, pentagon, hexagon, cross, four-point star, hourglass
 - **A character** — any letter or emoji, drawn inside a rounded outline
 - **An image** — png / jpg / webp / svg, any size, scaled for you
+- **A color** — 6 presets, a reset swatch, a color picker, or a typed hex value
 
 Names, favorites, icons and colors are all stored on the dsh side, so they
 follow you to another browser or your phone.
-- **A color** — 6 presets, a reset swatch, a color picker, or a typed hex value
 
 ---
 

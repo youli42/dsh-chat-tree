@@ -1,5 +1,5 @@
 /**
- * 自定义节点图片的存取。只收 PNG，文件名取内容哈希，只留最近 32 张。
+ * 自定义节点图片的存取。只收 PNG，文件名取内容哈希，只留最近 ICON_KEEP 张。
  */
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync, unlinkSync, utimesSync } from 'node:fs'

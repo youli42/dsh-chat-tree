@@ -25,7 +25,7 @@ host 半是普通 ESM，`index.js` 直接 import `src/host/`，没有构建。
 ```bash
 npm run build     # 重新拼 client.js
 npm run watch     # 改哪个 part 就自动重拼（配合 dsh 的热重载，刷新浏览器即可）
-npm test          # 先构建再跑十个测试脚本
+npm test          # 先构建再跑全部测试脚本
 ```
 
 改了 `src/host/` 或 `index.js` 要**重启 dsh**；只改 `src/client/` 的话
@@ -61,7 +61,7 @@ npm test          # 先构建再跑十个测试脚本
 |---|---|
 | `const.js` | 设置命名空间、滑杆档位、基准尺寸 `Z`、配色 `C` |
 | `runtime.js` | 宿主给的 react（**只有画界面的模块才 import 它**） |
-| `net.js` | 三个路由的地址 + `getJson` / `postJson` / `warn`；直连被围栏拒了改走 `/remote`（`apiPrefix()` 供 CSS url 用）|
+| `net.js` | 六条路由的地址 + `getJson` / `postJson` / `warn`；直连被围栏拒了改走 `/remote`（`apiPrefix()` 供 CSS url 用）|
 | `theme.js` | 现在是亮色还是暗色（读宿主 `body[data-ds-dark-theme]`） |
 | `pointer.js` | 这块屏能不能悬停（`useHover`）、手指戳一下算什么（`tapNext`）、WebKit 必补的样式表 |
 | `labels.js` | 节点上的用户标注：改名 + 收藏 + 收藏图标 / 颜色（落盘在 host 的 labels.json，localStorage 只是缓存） |

@@ -1,7 +1,7 @@
 /**
  * 路由外壳（src/host/http.js）的用例。
  *
- * 为什么单独测它：三个路由现在共用这一层壳，它错一次就是三个接口一起错。
+ * 为什么单独测它：六条路由现在共用这一层壳，它错一次就是六个接口一起错。
  * 而它又是**最不容易在界面上看出来**的那种错 —— 比如 405 回成 200、
  * 出错体不是 `{error}`（浏览器半的 `net.js` 就指望这个字段说人话）、
  * 图片走了 JSON 编码（那是一屏乱码，不是一张图）。
@@ -200,7 +200,7 @@ console.log('用例 7：拿不到 connection 就一律拒绝，绝不裸奔')
 	check(rejectionOf({ connection: { requestRejection: () => undefined } }, {}) === undefined, '正常的 connection 该放行')
 	// ⚠️ 这条钉着"别把 connection 从顶层 inject 里拿掉"。拿掉之后 cordis 给的 ctx 上
 	//    没有这个服务，上面那条 503 就会变成线上行为：树整个空白，而日志里什么都不会说。
-	check(inject.includes('connection'), 'connection 必须在顶层 inject 里，否则线上拿不到判决，三条路由会全部 503')
+	check(inject.includes('connection'), 'connection 必须在顶层 inject 里，否则线上拿不到判决，六条路由会全部 503')
 	console.log('  没有 connection / 接口对不上 → 503；正常的照常放行；connection 在顶层 inject 里')
 }
 

@@ -4,7 +4,7 @@
  * 干三件事：
  *   ① 听 `agent/created`，每条新分支一出生就接管（修掉原生 fork 的两个缺陷）→ src/host/adopt.js
  *   ② 注册设置 namespace → src/host/settings.js
- *   ③ 开三个路由 → outlines / shape / icon
+ *   ③ 开六条路由 → outlines / labels / parent / parents / shape / icon
  *
  * 【想改点什么，去哪个文件】
  *   日志怎么折成轮次 ······ src/host/outline.js
@@ -40,9 +40,9 @@ export const name = 'tree'
 /**
  * 必须的宿主服务；少一个都会让 fiber 永远 pending，所以只收真的离不开的。
  *
- * `connection` 是三条路由的信任围栏（Host/Origin + 登录 cookie，见 src/host/http.js）。
+ * `connection` 是六条路由的信任围栏（Host/Origin + 登录 cookie，见 src/host/http.js）。
  * 写进**顶层** inject 而不是 `ctx.inject` 是有意的：没有它就没有鉴权，
- * 那这三条路由宁可不开 —— 少个树，总好过把全部会话的提问预览挂在局域网上。
+ * 那这六条路由宁可不开 —— 少个树，总好过把全部会话的提问预览挂在局域网上。
  */
 export const inject = ['webServer', 'sessionPersistence', 'agents', 'connection']
 
@@ -71,7 +71,7 @@ export const __test = {
 }
 
 /**
- * 装上监听、设置和三个路由。
+ * 装上监听、设置和六条路由。
  * @param ctx - 携带 webServer / sessionPersistence / agents / connection 的 context
  */
 export function apply(ctx) {

@@ -22,7 +22,7 @@ DeepSeek Harness（dsh）的插件，一个 npm 包，靠 `package.json` 里的 
 > `client.js` **别手改**，下一次构建就冲掉了。它是 `node build.mjs` 把
 > `src/client/*.js` 拼出来的 —— 浏览器半必须是一个文件，这是 dsh 的规矩。
 
-host 半通过四条路由和浏览器半说话：`/plugins/dsh-chat-tree/{outlines,shape,icon,labels}`。
+host 半通过六条路由和浏览器半说话：`/plugins/dsh-chat-tree/{outlines,shape,icon,labels,parent,parents}`。
 两边的约定只有一条：**出错一律 `{error: string}`**。
 
 ## 2. 装成可开发的样子
@@ -59,7 +59,7 @@ NATIVE-BASELINE.md 末尾的办法把 asar 抄出来 diff 一遍，再决定要�
   disabled: true
 ```
 
-约 1 秒生效，不用重启。停用时三条路由和 `agent/created` 监听一起消失
+约 1 秒生效，不用重启。停用时六条路由和 `agent/created` 监听一起消失
 （`test-lifecycle.mjs` 盯着这件事）。
 
 ## 3. 测试
@@ -122,7 +122,7 @@ node tests/test-parent.mjs       # 分支血缘补记：parents.json、按继承
 1. **会话有轮次在跑，就一个字节都不许读它的旁车**（`src/host/rewind.js` 开头）。
    Windows 上开着读句柄，对面的原子 `rename` 就 EPERM，**整轮对话当场判失败且不重发**。
    别改成"只读文件尾"或"缩短读的时间"——窗口小了不等于没有。
-2. **三条路由的鉴权必须问宿主的 `connection.requestRejection`**（`src/host/http.js`）。
+2. **六条路由的鉴权必须问宿主的 `connection.requestRejection`**（`src/host/http.js`）。
    宿主的 webserver 不带任何鉴权，谁注册谁负责。拿不到判决要 fail-**closed**（503）。
    别改回手写 Host/Origin 判断 —— 那挡不住同网段直接 curl。
 3. **浏览器半的 fetch 被拒时要能走 `/remote`**（`src/client/net.js`）。上面那道闸是

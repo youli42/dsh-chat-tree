@@ -249,7 +249,7 @@ GET /plugins/dsh-chat-tree/outlines?cwd=<工作目录>
 > **No server-wide TLS, authentication, or origin policy** — route owners such as
 > `dsh-client-connection` enforce their own request policy.
 
-也就是说 `webServer.register` 注册的路由**不继承任何鉴权，谁注册谁负责**。我们注册了三条，
+也就是说 `webServer.register` 注册的路由**不继承任何鉴权，谁注册谁负责**。我们注册了六条，
 `/outlines` 会吐出每一轮的提问预览，`/shape` 和 `/icon` 是写操作。而这台机器上
 `remote-web-ui` 开着 `lanBind: true`、webserver 绑 `0.0.0.0` —— 不设防就是同网段可达。
 
@@ -283,7 +283,7 @@ DNS rebinding（Host 只认 IP 字面量，因为 rebinding 必须靠域名才�
 收完再判没有意义，内存那时已经吃进去了。
 
 > ⚠️ **拿不到 `connection` 就回 503，不许 fail-open**。fail-open 等于整道围栏白写。
-> `connection` 因此写进**顶层 `inject`**：没有它，这三条路由宁可不开。
+> `connection` 因此写进**顶层 `inject`**：没有它，这六条路由宁可不开。
 > test-http 用例 7 钉着这条。
 
 #### 手机怎么办 —— 这道闸是 loopback-only 的
@@ -1653,7 +1653,7 @@ settings 里。
 | 尺寸 | **不限制，自动换算**。等比缩进方框（contain），空出来的地方透明补齐，竖图横图都不变形 |
 | 为什么是 96 | 点最大 `Z.dot(11) × 缩放 250%` = 27.5px，悬停再 ×1.4 ≈ 38.5px，二倍屏 77 个物理像素 |
 | 为什么用内容哈希 | 同一张图传两次是同一个文件，来回换不会堆出好几份 |
-| 清理 | 只留最近 32 张。**每次被取走都会刷新 mtime**，所以"正在用的"每次开页面都会浮到最前面 |
+| 清理 | 只留最近 200 张（`ICON_KEEP`）。**每次被取走都会刷新 mtime**，所以"正在用的"每次开页面都会浮到最前面 |
 
 ### 连线：同一行上一像素只画一次
 

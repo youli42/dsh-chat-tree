@@ -1,5 +1,5 @@
 /**
- * 三个路由共用的壳：读 body、发 JSON、报错怎么变成状态码。
+ * 六条路由共用的壳：读 body、发 JSON、报错怎么变成状态码。
  *
  * 【为什么单独一份】以前三个 `webServer.register` 各自写了一遍
  * "`for await` 收 chunk → `JSON.parse` → try/catch → `writeHead`"，
@@ -14,7 +14,7 @@
  * 浏览器那边的对应物是 `src/client/net.js`，两边约定好错误体一律是 `{error: string}`。
  */
 
-/** host 半三个路由的公共前缀。改这里要连着改 `src/client/net.js` 的 `API`。 */
+/** host 半六条路由的公共前缀。改这里要连着改 `src/client/net.js` 的 `API`。 */
 export const API = '/plugins/dsh-chat-tree'
 
 // ===== 信任围栏 =====
@@ -22,7 +22,7 @@ export const API = '/plugins/dsh-chat-tree'
 // ⚠️ 宿主的 webserver **不带任何鉴权**，这是它 README 的原话：
 //   “No server-wide TLS, authentication, or origin policy — route owners such as
 //    `dsh-client-connection` enforce their own request policy.”
-// 谁注册谁负责。我们注册了三条：`/outlines` 会把每一轮的提问预览全吐出来，
+// 谁注册谁负责。我们注册了六条：`/outlines` 会把每一轮的提问预览全吐出来，
 // `/shape` 和 `/icon` 是写操作。
 //
 // 【为什么不自己写这道闸】这里一度手写过 Host / Origin 两道检查，判据是
@@ -38,7 +38,7 @@ export const API = '/plugins/dsh-chat-tree'
 //     顺带把 `Origin: null` 也按不同源处理，手写那版是放行的）
 //   · 然后才是浏览器鉴权：签名 cookie 对不上回 401
 // 返回 `undefined` 表示放行，否则就是该回的状态码。第一方插件
-// `@deepseek-ai/dsh-host-open-in-app` 的三条路由用的就是这个写法。
+// `@deepseek-ai/dsh-host-open-in-app` 的三条路由用的也是这个写法。
 //
 // ⚠️ 这道闸是 loopback-only 的，**手机不会因此被锁在门外**：局域网页面的请求本来就该走
 //    `remote-web-ui` 的 `/remote` 通道 —— 宿主在那头做完配对校验，再以 127.0.0.1 重发进来。
