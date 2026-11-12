@@ -21,6 +21,8 @@ const was = process.env.DSH_HOME
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-chat-tree-parents-'))
 process.env.DSH_HOME = home
 const { EMPTY_PARENTS, parentsPath, readParents, rememberParent, inferParent, resolveParents } = await import('../src/host/parents.js')
+const { adoptBranch } = await import('../src/host/adopt.js')
+const { sidecarPath } = await import('../src/host/paths.js')
 
 /** 造一条 collect 形状的会话。 */
 const session = (id, createdAt, turns, extra) => Object.assign({ id, createdAt, turns, isSeeded: true }, extra)
@@ -149,6 +151,41 @@ try {
 	console.log('用例 10：原子写不留 .tmp')
 	const leftovers = fs.readdirSync(path.join(home, 'plugins', 'dsh-chat-tree')).filter((name) => name.endsWith('.tmp'))
 	check(leftovers.length === 0, `留下了临时文件：${leftovers.join(', ')}`)
+
+	console.log('用例 11：header 没有 parentSession 时，接管从 parents.json 找父亲')
+	fs.rmSync(parentsPath(), { force: true })
+	rememberParent({ session: 'session-adopt', parent: 'session-ancestor' })
+	const parentFile = sidecarPath('session-ancestor')
+	fs.mkdirSync(path.dirname(parentFile), { recursive: true })
+	fs.writeFileSync(parentFile, JSON.stringify({
+		schemaVersion: 1,
+		revision: 0,
+		binding: { claudeSessionId: 'claude-1', cwd: '/w' },
+		activities: [{ turn: 1 }, { turn: 2 }],
+		rewind: { ranges: [], anchors: [{ turn: 1, uuid: 'u1' }], snapshots: [], pending: {} },
+	}))
+	const agent = {
+		id: 'session-adopt',
+		inbox: { nextTurn: [], nextStep: [], hasPending: false, remove: () => false },
+		session: {
+			id: 'session-adopt',
+			inheritedEventCount: 2,
+			header: { isSeeded: true }, // 桌面版 0.2.2 的 fork 就是这样：没有 parentSession
+			snapshotEvents: () => [
+				{ seq: 1, type: 'turn/end', data: { turn: 1 } },
+				{ seq: 2, type: 'session/end-seed', data: { inherited: true } },
+			],
+		},
+	}
+	const adoptCtx = { logger: { info() {}, warn() {} }, agents: { get: () => ({ status: 'idle' }) } }
+	adoptBranch(adoptCtx, agent)
+	const childFile = sidecarPath('session-adopt')
+	check(fs.existsSync(childFile), '没有 parentSession 时也该从 parents.json 找到父亲并写出 sidecar')
+	if (fs.existsSync(childFile)) {
+		const written = JSON.parse(fs.readFileSync(childFile, 'utf8'))
+		check(written.binding.claudeSessionId === 'claude-1', '该绑到父会话的外部会话')
+		check(written.rewind.pending.resumeAt === 'u1', `接续点该是父会话第 1 轮的锚点，实际 ${JSON.stringify(written.rewind.pending)}`)
+	}
 } finally {
 	if (was === undefined) delete process.env.DSH_HOME
 	else process.env.DSH_HOME = was

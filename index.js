@@ -143,7 +143,22 @@ export function apply(ctx) {
 		POST: ({ body }) => patchLabels(body),
 	})
 	route(ctx, '/parent', {
-		POST: ({ body }) => rememberParent(body),
+		POST: ({ body }) => {
+			const written = rememberParent(body)
+			const child = body !== null && typeof body === 'object' && typeof body.session === 'string' ? body.session : undefined
+			const agent = child === undefined ? undefined : ctx.agents?.get?.(child)
+			// 桌面版 0.2.2 的 fork 不写 parentSession，`agent/created` 那一刻我们还不知道
+			// 父亲是谁（adopt.js 会回落到 parents.json，但那时浏览器半还没把补记送上来）。
+			// 补记一落盘就再接管一次，graft 才拿得到父会话 —— 否则新分支永远失忆。
+			if (agent !== undefined) {
+				try {
+					adoptBranch(ctx, agent)
+				} catch (error) {
+					ctx.logger?.warn?.(`dsh-chat-tree: ${child} 补记血缘后重接管失败：${String(error)}`)
+				}
+			}
+			return written
+		},
 	})
 
 	// 血缘补记的只读快照。侧栏折叠拿它给列表项补父链（列表项只有宿主投影的 parentId）。

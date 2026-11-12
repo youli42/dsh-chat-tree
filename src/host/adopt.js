@@ -8,6 +8,7 @@
  *    `ctx.sessions.fork`，一次都没生效；原生消息行上那个分支按钮也绕得过去。
  */
 import { graft } from './graft.js'
+import { readParents } from './parents.js'
 import { statusProbe } from './rewind.js'
 import { lineage } from './lineage.js'
 
@@ -66,8 +67,14 @@ export function inheritedPendingIds(session) {
 // 补做是安全的，因为 `graft` 自己有 `child-already-bound` 那道闸：新分支一旦自己
 // 跑起来，dsh-claude 会给它建旁车，补做那一下会自动让位，不会覆盖任何东西。
 
-/** 还在等父会话空下来的定时器。插件停用时要全部清掉，否则 test-lifecycle 会抓到残留。 */
-const pendingGrafts = new Set()
+/**
+ * 还在等父会话空下来的定时器：**childId → timer**。
+ *
+ * 按 child 去重是有意的：重启 dsh 会把每条 seeded 会话 resume 一遍、重跑 adoptBranch，
+ * 父会话忙时同一个 child 会再排一次；旧的 Set 会让两条定时器同时等着，最后两条都去
+ * 补接同一个 child。留一条就够。
+ */
+const pendingGrafts = new Map()
 
 /** 重试间隔。父会话跑完一轮的量级是分钟，2 秒一探已经足够灵敏。 */
 export const GRAFT_RETRY_MS = 2000
@@ -81,7 +88,7 @@ export const GRAFT_RETRY_MAX = 150
  */
 export function cancelPendingGrafts() {
 	const count = pendingGrafts.size
-	for (const timer of pendingGrafts) clearTimeout(timer)
+	for (const timer of pendingGrafts.values()) clearTimeout(timer)
 	pendingGrafts.clear()
 	return count
 }
@@ -102,12 +109,14 @@ export function scheduleGraftRetry(ctx, childId, parentId, turn, opts) {
 	let timer
 
 	const stop = () => {
+		const waiting = pendingGrafts.get(childId)
+		if (waiting !== undefined) clearTimeout(waiting)
 		if (timer !== undefined) clearTimeout(timer)
-		pendingGrafts.delete(timer)
+		pendingGrafts.delete(childId)
 	}
 
 	const tick = () => {
-		pendingGrafts.delete(timer)
+		pendingGrafts.delete(childId)
 		left -= 1
 		let result
 		try {
@@ -134,9 +143,11 @@ export function scheduleGraftRetry(ctx, childId, parentId, turn, opts) {
 	}
 
 	const arm = () => {
+		// 先撤掉同一个 child 上一次排的（重启重放），别让两条定时器叠着跑
+		stop()
 		timer = setTimeout(tick, intervalMs)
 		timer.unref?.() // 别拦着 node 退出
-		pendingGrafts.add(timer)
+		pendingGrafts.set(childId, timer)
 	}
 
 	arm()
@@ -152,7 +163,21 @@ export function adoptBranch(ctx, agent) {
 	const session = agent.session
 	const header = session.header || {}
 	if (header.isSeeded !== true) return // 不是分支，不管
-	lineage.set(session.id, header.parentSession)
+	// 父会话从哪来：
+	//   · 0.1.5 / 上游已修好的 0.2：header 里就有 parentSession；
+	//   · 桌面版 0.2.2-rc.1：只塞了 cwd / isSeeded / agentPreset，**没有 parentSession**
+	//     （见 parents.js 开头）。浏览器半是 fork 成功之后才 POST /parent，那一下赶不上
+	//     同步的 agent/created —— 所以这里回落到我们自己的补记，/parent 落盘后会再接管一次。
+	// 缺了它，graft 会在第一道参数闸返回 bad-request，新分支永远接不上 Claude 记忆。
+	let parentId = header.parentSession
+	if (parentId === undefined) {
+		try {
+			parentId = readParents().parents[session.id]
+		} catch {
+			parentId = undefined
+		}
+	}
+	lineage.set(session.id, parentId)
 
 	// ① 删掉继承来的待办。
 	// ⚠️ 别加"只认刚出生的分支"之类的前置判断：踩过一次，判断恒为 true，
@@ -173,11 +198,11 @@ export function adoptBranch(ctx, agent) {
 		// 赌反了是打死父会话正在跑的那一轮。
 		const status = statusProbe(ctx)
 		const turn = forkTurnOf(session)
-		const result = graft(session.id, header.parentSession, turn, (id) => status(id) !== 'idle')
+		const result = graft(session.id, parentId, turn, (id) => status(id) !== 'idle')
 		if (result.grafted) ctx.logger?.info?.(`dsh-chat-tree: ${session.id} 已接上上下文 ${JSON.stringify(result)}`)
 		else if (result.reason === 'parent-busy') {
 			// 现在不读，但也不放弃 —— 排队等它跑完再补（见上面那段）
-			scheduleGraftRetry(ctx, session.id, header.parentSession, turn)
+			scheduleGraftRetry(ctx, session.id, parentId, turn)
 			ctx.logger?.info?.(`dsh-chat-tree: ${session.id} 父会话正在跑，读它会打断那一轮 —— 已排队，等它空下来再接`)
 		} else if (result.reason !== 'native-context-is-enough') ctx.logger?.info?.(`dsh-chat-tree: ${session.id} 未接上下文（${result.reason}）`)
 	} catch (error) {

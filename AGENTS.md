@@ -164,7 +164,6 @@ node tests/test-parent.mjs       # 分支血缘补记：parents.json、按继承
 - `shape.json` 只增不减，删掉的会话永远留在 `groupOf` / `detached` 里
 - `atomicWrite` 的 `rename` 失败时 `.tmp` 不清理，留孤儿文件
 - `reshape` 是读-改-写，两个客户端并发会静默丢一个补丁
-- 重启 dsh 会对每条 seeded 会话重跑 `adoptBranch`，父会话忙时可能给同一个 child 排多个补接定时器
 
 **John 2026-10-04 报的桌面版问题**（BACKLOG.md T1–T4）：空节点的标注所有树共用（key 是常量 `'root'`）；
 同层三个以上节点时自定义文字只剩「…」；缺"删除节点"；卡片展开后点外面不收起。
