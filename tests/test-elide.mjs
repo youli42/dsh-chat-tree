@@ -16,9 +16,6 @@
  */
 
 import { check, loadClientPure, report } from './test-kit.mjs'
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
 
 
 // ===== 第 1 步：取 client 的真函数 =====
@@ -236,41 +233,37 @@ console.log('用例 6：滑杆档位 —— 10..60 再加一格「不省略」')
 	console.log(`  ${steps.length} 档：${steps[0]}..${steps[steps.length - 2]} + 不省略`)
 }
 
-console.log('用例 7：真实日志回归 —— 任意半径下留下的节点都不多不少')
+// ⚠️ 这条以前只在"本机有真实会话目录"时才跑 —— 可它用的全是合成数据，
+//    没日志的机器上等于白丢一段覆盖。数据是合成的，就别拿真实 home 当门槛。
+console.log('用例 7：宽树回归（合成树）—— 任意半径下留下的节点都不多不少')
 {
-	const home = process.env.DSH_HOME_REAL || process.env.DSH_HOME || join(homedir(), '.dsh')
-	const root = join(home, 'sessions')
-	if (!existsSync(root)) {
-		console.log(`  跳过：找不到 ${root}（设 DSH_HOME_REAL 指向真实 home 再跑）`)
-	} else {
-		// 直接拿 test.mjs 的产物太绕，这里用合成的宽树代替：3 层岔路
-		const sessions = [branch('A', undefined, undefined, [1, 2, 3, 4, 5, 6])]
-		sessions.push(branch('B', 'A', 2, [3, 4, 5]))
-		sessions.push(branch('C', 'B', 4, [5, 6]))
-		sessions.push(branch('D', 'A', 5, [6, 7]))
-		const graph = graphOf(sessions, 'C')
-		// 逐个半径核对：shown 必须恰好等于 BFS 距离 <= radius 的集合
-		const byKey = new Map(graph.nodes.map((node) => [node, node]))
-		for (let radius = 1; radius <= 12; radius += 1) {
-			const anchor = pure.anchorNode(graph.nodes, undefined)
-			const view = pure.elide(graph.nodes, anchor, radius)
-			// 独立重算一遍 BFS，不复用被测代码
-			const dist = new Map([[anchor, 0]])
-			const queue = [anchor]
-			while (queue.length > 0) {
-				const node = queue.shift()
-				for (const near of [node.parent, ...node.children]) {
-					if (near === undefined || !byKey.has(near) || dist.has(near)) continue
-					dist.set(near, dist.get(node) + 1)
-					queue.push(near)
-				}
+	// 直接拿 test.mjs 的产物太绕，这里用合成的宽树代替：3 层岔路
+	const sessions = [branch('A', undefined, undefined, [1, 2, 3, 4, 5, 6])]
+	sessions.push(branch('B', 'A', 2, [3, 4, 5]))
+	sessions.push(branch('C', 'B', 4, [5, 6]))
+	sessions.push(branch('D', 'A', 5, [6, 7]))
+	const graph = graphOf(sessions, 'C')
+	// 逐个半径核对：shown 必须恰好等于 BFS 距离 <= radius 的集合
+	const byKey = new Map(graph.nodes.map((node) => [node, node]))
+	for (let radius = 1; radius <= 12; radius += 1) {
+		const anchor = pure.anchorNode(graph.nodes, undefined)
+		const view = pure.elide(graph.nodes, anchor, radius)
+		// 独立重算一遍 BFS，不复用被测代码
+		const dist = new Map([[anchor, 0]])
+		const queue = [anchor]
+		while (queue.length > 0) {
+			const node = queue.shift()
+			for (const near of [node.parent, ...node.children]) {
+				if (near === undefined || !byKey.has(near) || dist.has(near)) continue
+				dist.set(near, dist.get(node) + 1)
+				queue.push(near)
 			}
-			const want = new Set([...dist.entries()].filter(([, d]) => d <= radius).map(([node]) => node))
-			const same = want.size === view.shown.size && [...want].every((node) => view.shown.has(node))
-			check(same, `半径 ${radius}：期望 ${want.size} 个，实际 ${view.shown.size} 个`)
 		}
-		console.log(`  4 条分支 ${graph.nodes.length} 个节点，半径 1..12 全部与独立 BFS 一致`)
+		const want = new Set([...dist.entries()].filter(([, d]) => d <= radius).map(([node]) => node))
+		const same = want.size === view.shown.size && [...want].every((node) => view.shown.has(node))
+		check(same, `半径 ${radius}：期望 ${want.size} 个，实际 ${view.shown.size} 个`)
 	}
+	console.log(`  4 条分支 ${graph.nodes.length} 个节点，半径 1..12 全部与独立 BFS 一致`)
 }
 
 console.log('用例 8：设置 store —— 第一帧不可写，之后必须能恢复（两代宿主各跑一遍）')

@@ -83,6 +83,12 @@ function digest(out) {
 	return (picked.length > 0 ? picked : lines.filter((line) => line.trim() !== '').slice(-12)).slice(0, 40)
 }
 
+/**
+ * 跳过的退出码，和 tests/test-kit.mjs 的 `SKIP_CODE` 一字不差。
+ * 测试用 `process.exit(77)` 表示"环境里没有这份数据，一条断言都没跑"。
+ */
+const SKIP_CODE = 77
+
 const queue = files.slice()
 const results = []
 const started = Date.now()
@@ -93,9 +99,15 @@ await Promise.all(
 			const name = queue.shift()
 			const result = await runOne(name)
 			results.push(result)
-			const mark = result.code === 0 ? '✓' : '✗'
+			const skipped = result.code === SKIP_CODE
+			const mark = skipped ? '–' : result.code === 0 ? '✓' : '✗'
 			console.log(`${mark} ${name.padEnd(26)} ${String(result.ms).padStart(6)} ms`)
-			if (result.code !== 0) {
+			if (skipped) {
+				// 跳过的原因就打在它自己那行下面，`–` 也能在日志里搜到
+				const lines = result.out.split(/\r?\n/).filter((line) => line.trim() !== '')
+				const at = lines.map((line) => line.trim()).filter((line) => line.startsWith('– 跳过'))
+				console.log(`    ${at.length > 0 ? at[at.length - 1] : '（没有说明为什么跳过）'}`)
+			} else if (result.code !== 0) {
 				const lines = flag('verbose') ? result.out.split(/\r?\n/) : digest(result.out)
 				for (const line of lines) console.log(`    ${line}`)
 			}
@@ -103,9 +115,14 @@ await Promise.all(
 	}),
 )
 
-const failed = results.filter((one) => one.code !== 0)
+const skipped = results.filter((one) => one.code === SKIP_CODE)
+const failed = results.filter((one) => one.code !== 0 && one.code !== SKIP_CODE)
 console.log('')
-console.log(`${results.length} 个文件，${results.length - failed.length} 通过，${failed.length} 失败，共 ${((Date.now() - started) / 1000).toFixed(1)}s`)
+console.log(
+	`${results.length} 个文件，${results.length - failed.length - skipped.length} 通过，` +
+		`${failed.length} 失败，${skipped.length} 跳过，共 ${((Date.now() - started) / 1000).toFixed(1)}s`,
+)
+if (skipped.length > 0) console.log(`跳过（数据不在本机，没算失败）：${skipped.map((one) => one.name).join(', ')}`)
 if (failed.length > 0) {
 	console.log(`失败：${failed.map((one) => one.name).join(', ')}`)
 	console.log(`单独重跑：node tests/${failed[0].name}`)

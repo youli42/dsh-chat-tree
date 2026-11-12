@@ -36,7 +36,7 @@
  * @module test-branch
  */
 
-import { check, report } from './test-kit.mjs'
+import { check, report, skip } from './test-kit.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -88,10 +88,7 @@ const say = (message) => (message.content || []).map((part) => part.text || `<${
 
 // ===== 第 1 步：准备 =====
 
-if (!fs.existsSync(SESSIONS)) {
-	console.log(`跳过：找不到 ${SESSIONS}（设 DSH_HOME_REAL 指向真实 home 再跑）`)
-	process.exit(0)
-}
+if (!fs.existsSync(SESSIONS)) skip(`找不到 ${SESSIONS}（设 DSH_HOME_REAL 指向真实 home 再跑）`)
 
 /**
  * 只记 id → 文件，不记事件。
@@ -233,7 +230,7 @@ function rewind(id) {
 // 血缘表：host 半靠它往上找锚点。真实运行时由 collect() 刷新，这里手工喂。
 for (const id of allIds) if (!lineage.has(id)) lineage.set(id, undefined)
 console.log(`读到 ${allIds.length} 个真实会话，其中 ${branchIds.length} 个是分支`)
-check(branchIds.length > 0, '盘上至少要有一个分支才测得动')
+if (branchIds.length === 0) skip('盘上一条分支都没有（fork 过才有得测）')
 
 // ===== 第 3 步：断言 A —— 清掉继承来的待办 =====
 

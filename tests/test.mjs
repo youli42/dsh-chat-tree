@@ -22,7 +22,7 @@
  *   第4步  断言
  */
 
-import { check, loadClientPure, report } from './test-kit.mjs'
+import { check, loadClientPure, report, skip } from './test-kit.mjs'
 import fs from 'node:fs'
 import zlib from 'node:zlib'
 import path from 'node:path'
@@ -30,6 +30,10 @@ import { foldOutline, __test } from '../index.js'
 
 const HOME = process.env.DSH_HOME || 'E:/Programs/deepseek-harness/home'
 const PRINT = process.argv.includes('--print')
+
+// 没有真实日志就一条断言都跑不了。以前这里直接 readdirSync 抛错，
+// 换台机器 / CI 上 `npm test` 是红的；现在明确报"跳过"，运行器画 `–`。
+if (!fs.existsSync(path.join(HOME, 'sessions'))) skip(`找不到 ${path.join(HOME, 'sessions')}（设 DSH_HOME 指向真实 home 再跑）`)
 
 // ===== 第 1 步：读盘 =====
 

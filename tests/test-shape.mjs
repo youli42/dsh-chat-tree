@@ -29,13 +29,15 @@
  * @module test-shape
  */
 
-import { check, loadClientPure, report } from './test-kit.mjs'
+import { check, loadClientPure, report, skip } from './test-kit.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 
 const REAL_HOME = process.env.DSH_HOME || 'E:/Programs/deepseek-harness/home'
+
+if (!fs.existsSync(path.join(REAL_HOME, 'sessions'))) skip(`找不到 ${path.join(REAL_HOME, 'sessions')}（设 DSH_HOME 指向真实 home 再跑）`)
 
 
 // ===== 第 1 步：读盘 =====

@@ -102,10 +102,14 @@ node tests/test-fold.mjs         # 左侧会话列表按树折叠：座位、记
 node tests/test-labels.mjs       # 标注落盘：host 的 labels.json、老目录搬家
 node tests/test-split.mjs        # 拆共用的 Claude 记录文件
 node tests/test-active.mjs       # 现在看到的是第几轮、钉住、未读三段式
+node tests/test-parent.mjs       # 分支血缘补记：parents.json、按继承前缀猜父亲、/outlines 接回父对话
 ```
 
-`test-branch.mjs` / `test.mjs` / `test-rewind.mjs` 要读真实会话日志，不在默认位置时设 `DSH_HOME_REAL` 指过去，
-否则它们自己跳过。
+要读真实会话日志的测试（`test-branch` / `test.mjs` / `test-shape` / `test-rewind`）用 `DSH_HOME`；
+`test-branch` 也认 `DSH_HOME_REAL`（它要在临时 home 里写旁车，得把真实的那个单独指出来）。
+数据不在本机时它们**不算失败**：用 `tests/test-kit.mjs` 的 `skip('缺什么')` 退出，退出码 77。
+运行器把 77 画成 `–` 并打印原因，最后单列「跳过」—— **别再用 `process.exit(0)` 冒充通过**，
+那正是「CI 全绿、一条断言没跑」的来路。
 
 > **加断言的规矩：写完先把被测的那行改坏，确认它真的变红，再改回来。**
 > 这个项目里大部分 bug 的失败方式是静默的（树少画一个点、定时器活过插件），

@@ -30,6 +30,25 @@ import { createDom } from './kit/dom-lite.mjs'
 let failures = 0
 
 /**
+ * 跳过的退出码。**必须和 tests/run.mjs 里的常量一致。**
+ *
+ * 有些测试要真实会话日志 / 真实 home 才跑得动。以前它们 `process.exit(0)`，
+ * 运行器画一个 ✓ —— 看起来全绿，实际一条断言都没跑。现在统一用 77：
+ * 运行器把它画成 `–`、打印原因，不算失败，但也不会混进"通过"里。
+ */
+export const SKIP_CODE = 77
+
+/**
+ * 这条测试没数据可测，跳过。**只在"环境里没有这份数据"时用**，
+ * 别拿它盖住真正的失败。
+ * @param reason - 人话：缺什么、该设哪个环境变量
+ */
+export function skip(reason) {
+	console.log(`\n– 跳过：${reason}`)
+	process.exit(SKIP_CODE)
+}
+
+/**
  * 一条断言。**不抛异常** —— 一次跑完把所有问题都摆出来，比修一条跑一次快得多。
  * @param ok - 条件
  * @param message - 失败时打印什么
