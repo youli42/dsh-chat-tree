@@ -4,3 +4,8 @@ test_number.txt
 *.tgz
 .npmrc
 CLAUDE.local.md
+
+# 编辑器插件的本地笔记（不是仓库内容）
+.code-notes/
+# 本仓库用 npm + package-lock.json；pnpm-lock 只是某次本地安装留下的
+pnpm-lock.yaml
