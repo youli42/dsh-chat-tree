@@ -364,6 +364,22 @@ console.log('用例 9：删除 —— 只在展开档；第一下摊开确认行
 	void deletePlan
 }
 
+// ===== 第 11 步：用例 9 =====
+console.log('用例 9：收藏节点的色值框也把卡片按住')
+{
+	const { card, log } = openCard(a2, { favorites: new Set([a2.key]) })
+	card.fire(card.el, 'onDoubleClick')
+	const hex = card.find((el) => el.tag === 'input' && el.props.placeholder === '#RRGGBB')
+	check(hex !== undefined, '收藏节点展开后该有色值框')
+	const locks = () => log.filter((one) => one[0] === 'onLock').map((one) => one[1])
+	check(locks()[locks().length - 1] === false, '没碰框时不该锁')
+	hex.focus()
+	check(locks()[locks().length - 1] === true, '色值框拿到光标就该 onLock(true)，否则鼠标一飘出卡片就把草稿丢了')
+	hex.blur()
+	check(locks()[locks().length - 1] === false, '离开色值框该解锁')
+	card.unmount()
+}
+
 // 焦点守卫挂在 document 上的监听，卸载后必须摘干净
 await tick()
 check(dom.document.listenerCount('pointerdown') === 0, `卸载后 document 上还留着 ${dom.document.listenerCount('pointerdown')} 个 pointerdown 监听`)

@@ -159,6 +159,8 @@ export function deleteAsk(plan) {
  */
 export function HexField(props) {
 	const [draft, setDraft] = react.useState(null)
+	// 中文输入法拼字中途的回车不能当成"确认"（同 NameField / 字框）
+	const composing = react.useRef(false)
 	const real = String(props.value === undefined || props.value === null ? '' : props.value).toUpperCase()
 	const shown = draft === null ? real : draft
 	const good = hexOf(shown) !== undefined
@@ -181,22 +183,36 @@ export function HexField(props) {
 		onChange: (event) => {
 			const next = event.target.value
 			setDraft(next)
+			if (composing.current) return
 			const ok = hexOf(next)
 			if (ok !== undefined && typeof props.onPick === 'function') props.onPick(ok)
 		},
+		// ⚠️ 光标进框就要把整张卡按住（`onHold`）。这是卡片里的**第三个**输入框，
+		//    NameField 和「字」框早就报了，这里曾经漏掉：鼠标一飘出导轨，Rail 的
+		//    onMouseLeave 280ms 后就把卡片关了，色值草稿跟着输入框一起没了。
+		onFocus: () => {
+			if (typeof props.onHold === 'function') props.onHold()
+		},
 		// 走开就把没打完的草稿丢掉，显示回真实值
-		onBlur: () => setDraft(null),
+		onBlur: () => {
+			composing.current = false
+			setDraft(null)
+			if (typeof props.onDrop === 'function') props.onDrop()
+		},
 		onClick: (event) => event.stopPropagation(),
 		onDoubleClick: (event) => event.stopPropagation(),
 		onKeyDown: (event) => {
 			event.stopPropagation()
+			if (isComposingKey(event, composing.current)) return
 			if (event.key === 'Enter' || event.key === 'Escape') {
 				setDraft(null)
-				event.currentTarget.blur()
+				if (typeof event.currentTarget.blur === 'function') event.currentTarget.blur()
 			}
 		},
 		onKeyUp: (event) => event.stopPropagation(),
 		onKeyPress: (event) => event.stopPropagation(),
+		onCompositionStart: () => { composing.current = true },
+		onCompositionEnd: () => { composing.current = false },
 	})
 }
 
@@ -562,6 +578,8 @@ export function FavIconRow(props) {
 			key: 'hex',
 			value: typeof props.ownColor === 'string' ? props.ownColor : color,
 			size: PICK,
+			onHold: props.onHold,
+			onDrop: props.onDrop,
 			onPick: (value) => { if (typeof onColor === 'function') onColor(value) },
 		}),
 	])
